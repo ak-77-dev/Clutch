@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <style>
+      html, body { margin: 0; background: transparent; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; user-select: none; }
+      .card {
+        position: absolute; right: 12px; top: 12px; width: 340px; display: grid; grid-template-columns: 6px 1fr; opacity: 0;
+        transform: translateX(24px); transition: opacity .16s ease-out, transform .22s cubic-bezier(.2, .8, .2, 1);
+        background: rgba(9, 9, 10, .94); color: #f2efea; box-shadow: 0 18px 40px rgba(0, 0, 0, .55);
+        clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+      }
+      .card.on { opacity: 1; transform: none; }
+      .bar { background: #d4ff3a; }
+      .card.rec .bar { background: #ff3b30; }
+      .card.error .bar { background: #f2555a; }
+      .card.info .bar { background: #43d17a; }
+      .body { padding: 12px 16px 13px; }
+      .kicker { font: 600 10px/1 Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; color: #6d6963; display: flex; gap: 8px; align-items: center; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #d4ff3a; box-shadow: 0 0 10px #d4ff3a; }
+      .card.rec .dot { background: #ff3b30; box-shadow: 0 0 10px #ff3b30; animation: pulse 1s infinite alternate; }
+      @keyframes pulse { to { opacity: .35; } }
+      .title { font: 900 26px/1.05 Impact, 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: .02em; margin-top: 6px; }
+      .sub { font-size: 12.5px; color: #aaa59d; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+  </head>
+  <body>
+    <div class="card" id="card">
+      <div class="bar"></div>
+      <div class="body">
+        <div class="kicker"><span class="dot"></span>Clutch</div>
+        <div class="title" id="title"></div>
+        <div class="sub" id="sub"></div>
+      </div>
+    </div>
+    <script>
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      // Short synthesized cues (no audio files): a rising two-note blip for clips, low buzz for errors.
+      function beep(kind) {
+        const notes = { clip: [880, 1320], start: [660, 660], error: [220, 180] }[kind]
+        if (!notes) return
+        const t = ctx.currentTime
+        notes.forEach((f, i) => {
+          const o = ctx.createOscillator()
+          const g = ctx.createGain()
+          o.type = kind === 'error' ? 'square' : 'sine'
+          o.frequency.value = f
+          g.gain.setValueAtTime(0.0001, t + i * 0.08)
+          g.gain.exponentialRampToValueAtTime(0.12, t + i * 0.08 + 0.01)
+          g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.08 + 0.12)
+          o.connect(g).connect(ctx.destination)
+          o.start(t + i * 0.08)
+          o.stop(t + i * 0.08 + 0.14)
+        })
+      }
+      let hideTimer
+      window.show = ({ title, sub, tone, sound }) => {
+        const card = document.getElementById('card')
+        document.getElementById('title').textContent = title || ''
+        document.getElementById('sub').textContent = sub || ''
+        card.className = `card ${tone || ''}`
+        requestAnimationFrame(() => card.classList.add('on'))
+        clearTimeout(hideTimer)
+        hideTimer = setTimeout(() => card.classList.remove('on'), tone === 'rec' ? 1500 : 2500)
+        if (sound) ctx.resume().then(() => beep(sound))
+      }
+    </script>
+  </body>
+</html>

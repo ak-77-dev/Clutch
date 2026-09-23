@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deltaInfo, fmtDuration, fmtValue, plural, timeAgo } from './format'
+import { deltaInfo, fmtBytes, fmtClock, fmtDuration, fmtHours, fmtValue, hoursNumber, monogram, plural, timeAgo } from './format'
 
 describe('format', () => {
   it('pluralizes character labels', () => {
@@ -32,5 +32,13 @@ describe('format', () => {
     expect(timeAgo('2026-09-22T11:30:00Z', now)).toBe('30m ago')
     expect(timeAgo('2026-09-22T07:00:00Z', now)).toBe('5h ago')
     expect(timeAgo('2026-09-20T12:00:00Z', now)).toBe('2d ago')
+  })
+
+  it('formats playtime, sizes and timecodes', () => {
+    expect([fmtHours(0), fmtHours(42), fmtHours(3725), fmtHours(59 * 60)]).toEqual(['0m', '42s', '1h 2m', '59m'])
+    expect([hoursNumber(45_000), hoursNumber(600_000)]).toEqual(['12.5', '167'])
+    expect([fmtBytes(512), fmtBytes(1536), fmtBytes(5 * 1024 ** 3)]).toEqual(['512 B', '1.5 KB', '5.0 GB'])
+    expect([fmtClock(75.4), fmtClock(3725)]).toEqual(['1:15', '1:02:05'])
+    expect([monogram('VALORANT'), monogram('Call of Duty Modern Warfare')]).toEqual(['VAL', 'COD'])
   })
 })

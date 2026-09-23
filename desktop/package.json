@@ -1,0 +1,17 @@
+{
+  "name": "clutch-desktop",
+  "productName": "Clutch",
+  "version": "0.2.0",
+  "description": "Clutch desktop: game launcher, playtime tracker, hotkey clipping and stats hub.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env CLUTCH_DEV_URL=http://localhost:5173 electron .",
+    "check": "node --check main.js && node --check preload.js && node --check lib.js && node --test"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^44.4.5"
+  }
+}

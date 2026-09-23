@@ -61,3 +61,50 @@ export function deltaInfo(delta: number | null | undefined, higherIsBetter = tru
 }
 
 export const RESULT_LABEL = { win: 'Victory', loss: 'Defeat', draw: 'Draw', remake: 'Remake' } as const
+
+/** 3725 -> "1h 2m"; 42 -> "42s"; 0 -> "0m". */
+export function fmtHours(seconds: number | null | undefined): string {
+  const s = Math.max(0, Math.round(seconds ?? 0))
+  if (s < 60) return s ? `${s}s` : '0m'
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return h ? `${h}h ${m}m` : `${m}m`
+}
+
+/** Total hours with one decimal under 100 ("12.5"), whole hours above ("148"). */
+export function hoursNumber(seconds: number): string {
+  const h = seconds / 3600
+  return h >= 100 ? Math.round(h).toLocaleString() : h.toFixed(1)
+}
+
+export function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = bytes / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`
+}
+
+/** 75.4 -> "1:15" (clip lengths, timecodes). */
+export function fmtClock(seconds: number | null | undefined): string {
+  const s = Math.max(0, seconds ?? 0)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`
+}
+
+export function timeAgoUnix(unix: number | null | undefined, now: Date = new Date()): string {
+  return unix ? timeAgo(new Date(unix * 1000).toISOString(), now) : 'never'
+}
+
+/** Short monogram for games without official art (never a logo). */
+export function monogram(name: string): string {
+  const words = name.replace(/[^A-Za-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean)
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase()
+  return words.slice(0, 3).map((w) => w[0]).join('').toUpperCase()
+}

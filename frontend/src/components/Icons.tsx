@@ -1,0 +1,32 @@
+/** Hand-drawn 24px stroke icons (no icon font, nothing to load). */
+type P = { className?: string }
+const S = (d: React.ReactNode, { className }: P = {}) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="square" strokeLinejoin="miter" aria-hidden>
+    {d}
+  </svg>
+)
+
+export const HomeIcon = (p: P) => S(<path d="M3 11 12 4l9 7v9h-6v-6H9v6H3z" />, p)
+export const LibraryIcon = (p: P) => S(<><rect x="3" y="4" width="5" height="16" /><rect x="10" y="4" width="5" height="16" /><path d="m17 5 4 1-3 14-4-1" /></>, p)
+export const ClipIcon = (p: P) => S(<><rect x="3" y="6" width="13" height="12" /><path d="m16 10 5-3v10l-5-3" /></>, p)
+export const ClockIcon = (p: P) => S(<><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3.5 2" /></>, p)
+export const StatsIcon = (p: P) => S(<path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />, p)
+export const GearIcon = (p: P) => S(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></>, p)
+export const PlayIcon = (p: P) => S(<path d="M7 4.5v15L20 12z" fill="currentColor" stroke="none" />, p)
+export const RecIcon = (p: P) => S(<circle cx="12" cy="12" r="6" fill="currentColor" stroke="none" />, p)
+export const CameraIcon = (p: P) => S(<><path d="M3 8h4l2-3h6l2 3h4v11H3z" /><circle cx="12" cy="13" r="3.5" /></>, p)
+export const ScissorsIcon = (p: P) => S(<><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><path d="M8 7.5 20 17M8 16.5 20 7" /></>, p)
+export const StarIcon = ({ filled, ...p }: P & { filled?: boolean }) =>
+  S(<path d="m12 3 2.7 5.8 6.3.7-4.7 4.3 1.3 6.2L12 16.9 6.4 20l1.3-6.2L3 9.5l6.3-.7z" fill={filled ? 'currentColor' : 'none'} />, p)
+export const TrashIcon = (p: P) => S(<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />, p)
+export const FolderIcon = (p: P) => S(<path d="M3 6h7l2 2h9v11H3z" />, p)
+export const SearchIcon = (p: P) => S(<><circle cx="11" cy="11" r="6.5" /><path d="m16 16 5 5" /></>, p)
+export const CloseIcon = (p: P) => S(<path d="M5 5l14 14M19 5 5 19" />, p)
+export const ChevronLeft = (p: P) => S(<path d="M15 5l-7 7 7 7" />, p)
+export const ChevronRight = (p: P) => S(<path d="m9 5 7 7-7 7" />, p)
+export const RefreshIcon = (p: P) => S(<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />, p)
+export const GifIcon = (p: P) => S(<><rect x="2.5" y="5" width="19" height="14" /><path d="M9 10H7v4h2v-2M12 10v4M15 14v-4h3M15 12h2" /></>, p)
+export const DiscordIcon = (p: P) => S(<><path d="M5 17c4 2.5 10 2.5 14 0M7 6c3-1.3 7-1.3 10 0l2 9c-4 3-10 3-14 0z" /><circle cx="9.5" cy="12" r="1" fill="currentColor" /><circle cx="14.5" cy="12" r="1" fill="currentColor" /></>, p)
+export const EyeOffIcon = (p: P) => S(<><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a15 15 0 0 1-3 3.5M6.1 7.9A15 15 0 0 0 3 12s4 6 9 6a8.6 8.6 0 0 0 3.3-.6" /></>, p)
+export const PlusIcon = (p: P) => S(<path d="M12 4v16M4 12h16" />, p)
+export const BoltIcon = (p: P) => S(<path d="M13 2 4 14h7l-1 8 9-12h-7z" />, p)

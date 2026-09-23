@@ -66,7 +66,8 @@ class Desktop:
         self.art = ArtResolver(self.home / "art")
         self.clips = ClipStore(self.home / "local.db", self.home / "thumbs")
         self.buffer = ReplayBuffer(self.home / "spool")
-        self.playtime = PlaytimeTracker(self.home / "local.db", lambda: self.library.all(include_hidden=True))
+        # Hidden entries (tools like Wallpaper Engine, anything the player hid) aren't tracked as games.
+        self.playtime = PlaytimeTracker(self.home / "local.db", lambda: self.library.all())
         self._auto_buffer = False  # started by a game launch (so stop it when games close)
         self._lock = threading.RLock()
         self.playtime.on_start.append(self._game_started)
@@ -75,8 +76,7 @@ class Desktop:
         self.clips_root.mkdir(parents=True, exist_ok=True)
         if start_threads:
             self.buffer.cleanup_stale()
-            if not self.library.games:
-                self.library.scan()
+            self.library.scan()  # ~20 ms; picks up games installed since last run
             threading.Thread(target=self._warm_art, name="clutch-art", daemon=True).start()
             self.playtime.start()
 
@@ -223,6 +223,20 @@ class Desktop:
                 }
             )
         return out
+
+    def playtime_report(self, days: int) -> dict[str, Any]:
+        """Playtime for the UI, leaving out entries the player hid (tools, uninstalled games)."""
+        hidden = self.library.hidden
+        daily = self.playtime.daily(days)
+        for d in daily:
+            for gid in [g for g in d["games"] if g in hidden]:
+                d["seconds"] -= d["games"].pop(gid)
+        return {
+            "now": [n for n in self.playtime.now_playing() if n["game_id"] not in hidden],
+            "games": [g for g in self.playtime.summary() if g["game_id"] not in hidden],
+            "daily": daily,
+            "sessions": [s for s in self.playtime.sessions(limit=60) if s["game_id"] not in hidden][:40],
+        }
 
     def status(self) -> dict[str, Any]:
         return {

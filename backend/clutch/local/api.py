@@ -100,6 +100,15 @@ def router(desktop: Desktop) -> APIRouter:
 
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
+    @r.post("/shutdown")
+    def shutdown() -> dict[str, Any]:
+        """Called by the Electron shell on quit: stop FFmpeg and close open sessions, then exit."""
+        import threading
+
+        desktop.shutdown()
+        threading.Timer(0.3, os._exit, args=(0,)).start()
+        return {"ok": True}
+
     # ── settings ────────────────────────────────────────────────────────────
     @r.get("/settings")
     def get_settings() -> dict[str, Any]:
@@ -175,12 +184,7 @@ def router(desktop: Desktop) -> APIRouter:
     # ── playtime ────────────────────────────────────────────────────────────
     @r.get("/playtime")
     def playtime(days: int = Query(182, ge=7, le=730)) -> dict[str, Any]:
-        return {
-            "now": desktop.playtime.now_playing(),
-            "games": desktop.playtime.summary(),
-            "daily": desktop.playtime.daily(days),
-            "sessions": desktop.playtime.sessions(limit=40),
-        }
+        return desktop.playtime_report(days)
 
     @r.get("/playtime/{game_id}/sessions")
     def game_sessions(game_id: str) -> list[dict[str, Any]]:

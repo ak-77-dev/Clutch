@@ -65,6 +65,8 @@ MAPS: dict[str, str] = {
     "Haven": "2bee0dc9-4ffe-519b-1cbd-7fbe763a6047",
     "Corrode": "1c18ab1f-420d-0d8b-71d0-77ad3c439115",
 }
+# Played to a kill target, not rounds: per-round stats (ACS, ADR) are meaningless and would skew averages.
+NON_ROUND_MODES = {"Deathmatch", "Team Deathmatch"}
 TIER_NAMES = [
     "Unranked",
     "Unused1",
@@ -187,6 +189,8 @@ class ValorantProvider(GameProvider):
         data = self.client.get(f"{HENRIK}/v3/by-puuid/matches/{profile.region}/{profile.key}", {"size": min(limit, 10)})["data"]
         ids = []
         for m in data:
+            if not (m or {}).get("metadata"):  # HenrikDev stubs out unavailable matches with metadata=None
+                continue
             mid = m["metadata"]["matchid"]
             self._page[mid] = m
             ids.append(mid)
@@ -204,6 +208,8 @@ class ValorantProvider(GameProvider):
 
     def parse(self, raw: dict[str, Any], profile: Profile) -> Match | None:
         md = raw["metadata"]
+        if md.get("mode") in NON_ROUND_MODES:
+            return None
         players = (raw.get("players") or {}).get("all_players") or []
         me = next((p for p in players if p.get("puuid") == profile.key), None)
         if me is None:

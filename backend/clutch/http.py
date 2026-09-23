@@ -96,8 +96,10 @@ class JsonClient:
             if resp.status_code in (401, 403):
                 raise AuthFailed("API key rejected or expired", resp.status_code)
             if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:
+                # HenrikDev sends x-ratelimit-reset (seconds until the window resets) instead of Retry-After.
+                hint = resp.headers.get("Retry-After") or (resp.status_code == 429 and resp.headers.get("x-ratelimit-reset"))
                 try:
-                    delay = float(resp.headers.get("Retry-After") or 2**attempt)
+                    delay = float(hint or 2**attempt)
                 except ValueError:
                     delay = 2**attempt
                 self._sleep(min(delay, 60.0))

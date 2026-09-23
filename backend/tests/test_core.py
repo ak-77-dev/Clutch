@@ -57,6 +57,9 @@ def test_json_client_retries_and_maps_errors():
     sleeps: list[float] = []
     assert client([Resp(429, headers={"Retry-After": "2"}), Resp(200, {"ok": 1})], sleeps).get("u") == {"ok": 1}
     assert sleeps == [2.0]
+    sleeps.clear()  # HenrikDev signals its window with x-ratelimit-reset instead of Retry-After
+    assert client([Resp(429, headers={"x-ratelimit-reset": "37"}), Resp(200, {"ok": 1})], sleeps).get("u") == {"ok": 1}
+    assert sleeps == [37.0]
     with pytest.raises(NotFound):
         client([Resp(404)], []).get("u")
     with pytest.raises(AuthFailed):

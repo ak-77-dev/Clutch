@@ -19,6 +19,7 @@ from clutch.models import GameMeta, Match, Metric, Profile, ScoreRow
 HENRIK = "https://api.henrikdev.xyz/valorant"
 MEDIA = "https://media.valorant-api.com"
 TIERS_UUID = "03621f52-342b-cf4e-4f86-9350a49c6d04"  # current competitive tier set
+NO_RECENT_MATCHES = 24  # HenrikDev error code: account exists but it has no recent match to read it from
 
 AGENTS: dict[str, tuple[str, str]] = {  # name -> (uuid, role)
     "Jett": ("add6443a-41bd-e414-f6ad-e58d267f4e95", "Duelist"),
@@ -154,7 +155,16 @@ class ValorantProvider(GameProvider):
         if "#" not in query:
             raise NotFound("Use a full Riot ID: Name#TAG")
         name, tag = (s.strip() for s in query.rsplit("#", 1))
-        acct = self.client.get(f"{HENRIK}/v1/account/{quote(name)}/{quote(tag)}")["data"]
+        try:
+            acct = self.client.get(f"{HENRIK}/v1/account/{quote(name)}/{quote(tag)}")["data"]
+        except NotFound as exc:
+            codes = {e.get("code") for e in ((exc.body or {}).get("errors") or []) if isinstance(e, dict)}
+            if NO_RECENT_MATCHES in codes:
+                raise NotFound(
+                    f"{name}#{tag} exists but has no recent matches. Valorant only exposes recent games, "
+                    "so play one (even a Deathmatch) and search again."
+                ) from None
+            raise
         profile = Profile(
             game="valorant",
             key=acct["puuid"],

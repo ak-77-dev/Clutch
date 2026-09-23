@@ -119,6 +119,24 @@ def test_valorant_skips_kill_target_modes_and_unavailable_matches():
     assert v.list_match_ids(prof, 10) == [raw["metadata"]["matchid"]]
 
 
+def test_valorant_explains_accounts_without_recent_matches():
+    from clutch.http import NotFound
+
+    class Missing:
+        def __init__(self, code):
+            self.code = code
+
+        def get(self, url, params=None):
+            raise NotFound("not found", 404, {"errors": [{"code": self.code, "status": 404}]})
+
+    v = ValorantProvider(api_key="", client=Missing(24))
+    with pytest.raises(NotFound, match="no recent matches"):
+        v.resolve("Someone#NA1")
+    v.client = Missing(22)  # genuinely unknown account keeps the generic message
+    with pytest.raises(NotFound, match="^not found$"):
+        v.resolve("Nobody#0000")
+
+
 def test_rocket_league_adapter_uses_rlstats():
     rl = RocketLeagueProvider(api_key="")
     prof = rl.demo_profile()

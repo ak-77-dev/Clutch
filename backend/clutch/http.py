@@ -14,9 +14,10 @@ RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 class ApiError(RuntimeError):
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(self, message: str, status: int | None = None, body: Any = None) -> None:
         super().__init__(message)
         self.status = status
+        self.body = body  # upstream JSON error payload, when there is one
 
 
 class NotFound(ApiError):
@@ -92,7 +93,11 @@ class JsonClient:
                 self._sleep(2**attempt)
                 continue
             if resp.status_code == 404:
-                raise NotFound("not found", 404)
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = None
+                raise NotFound("not found", 404, body)
             if resp.status_code in (401, 403):
                 raise AuthFailed("API key rejected or expired", resp.status_code)
             if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:

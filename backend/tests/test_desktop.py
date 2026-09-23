@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import wave
 from pathlib import Path
@@ -139,7 +140,7 @@ def test_library_dedupes_hides_and_drops_missing_installs(tmp_path):
     real = tmp_path / "Valorant"
     real.mkdir()
     a = lib.Game("riot:valorant", "VALORANT", "riot", str(real), {"uri": "x"})
-    dup = lib.Game("reg:valorant", "VALORANT", "registry", str(real) + "\\", {"uri": "y"})  # same folder, other source
+    dup = lib.Game("reg:valorant", "VALORANT", "registry", str(real) + os.sep, {"uri": "y"})  # same folder, other source
     gone = lib.Game("steam:1", "Uninstalled", "steam", str(tmp_path / "missing"), {"uri": "z"})
     library = lib.Library(tmp_path / "lib.json", scanners=[lambda: [a], lambda: [dup, gone], lambda: 1 / 0])
     assert [g.id for g in library.scan()] == ["riot:valorant"]
@@ -149,6 +150,15 @@ def test_library_dedupes_hides_and_drops_missing_installs(tmp_path):
     assert reloaded.hidden == {"riot:valorant"}
     with pytest.raises(ValueError):
         library.add_custom("Notes", str(tmp_path / "notes.txt"))
+
+
+def test_known_non_games_start_hidden_but_can_be_unhidden(tmp_path):
+    (tmp_path / "we").mkdir()
+    wallpaper = lib.Game("steam:431960", "Wallpaper Engine", "steam", str(tmp_path / "we"), {"uri": "x"})
+    library = lib.Library(tmp_path / "lib.json", scanners=[lambda: [wallpaper]])
+    assert library.scan() == [] and library.hidden == {"steam:431960"}
+    library.set_hidden("steam:431960", False)
+    assert [g.id for g in library.scan()] == ["steam:431960"]  # the player's choice survives rescans
 
 
 # ── playtime ────────────────────────────────────────────────────────────────
@@ -358,3 +368,57 @@ def test_desktop_routes_absent_in_web_mode(monkeypatch):
     monkeypatch.delenv("CLUTCH_DESKTOP", raising=False)
     api = TestClient(create_app(Clutch(Store(":memory:"), default_providers()), static_dir=None))
     assert api.get("/api/desktop/status").status_code == 404
+
+
+def test_stale_recorders_from_a_crashed_run_are_stopped(tmp_path):
+    import time
+
+    from clutch.local.capture import kill_stale_recorders
+
+    spool = tmp_path / "spool"
+    (spool / "buffer_1").mkdir(parents=True)
+    # An FFmpeg left recording into our spool (what a crashed backend leaves behind)...
+    stray = subprocess.Popen(
+        [
+            ffmpeg_exe(),
+            "-v",
+            "error",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x64:rate=5",
+            "-t",
+            "60",
+            "-y",
+            str(spool / "buffer_1" / "v.ts"),
+        ],
+        stdin=subprocess.DEVNULL,
+    )
+    # ...and one that belongs to someone else.
+    other = subprocess.Popen(
+        [
+            ffmpeg_exe(),
+            "-v",
+            "error",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x64:rate=5",
+            "-t",
+            "60",
+            "-y",
+            str(tmp_path / "other.ts"),
+        ],
+        stdin=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(0.5)
+        assert kill_stale_recorders(spool) == 1
+        stray.wait(timeout=5)
+        assert other.poll() is None  # untouched
+    finally:
+        for p in (stray, other):
+            if p.poll() is None:
+                p.kill()

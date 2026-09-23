@@ -1,33 +1,41 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Link, Route, Routes, useParams } from 'react-router-dom'
+import { BrowserRouter, Link, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { api } from './api'
 import { SearchBar } from './components/SearchBar'
-import { Sidebar } from './components/Sidebar'
+import { DesktopProvider, Rail, Titlebar } from './components/Shell'
 import { GamesContext, useAsync, useGame } from './hooks'
-import { Home } from './pages/Home'
+import { Home, StatsHub } from './pages/Home'
 
-// Profile pages pull in the charting library; load them on demand.
+// Pages that pull in the charting library or heavier UI load on demand.
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
+const Library = lazy(() => import('./pages/Library').then((m) => ({ default: m.Library })))
+const GameDetail = lazy(() => import('./pages/GameDetail').then((m) => ({ default: m.GameDetail })))
+const Clips = lazy(() => import('./pages/Clips').then((m) => ({ default: m.Clips })))
+const Playtime = lazy(() => import('./pages/Playtime').then((m) => ({ default: m.Playtime })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
-function TopBar({ search }: { search: boolean }) {
+function TopBar() {
   const { game } = useParams()
   const meta = useGame(game)
   return (
     <div className="topbar">
-      <Link to="/" className="crumb">
-        Clutch
+      <Link to="/stats" className="crumb">
+        Stats
       </Link>
-      {meta && <span className="crumb muted">/ {meta.name}</span>}
-      {search && <SearchBar game={game} />}
+      {meta && <span className="crumb">/ {meta.name}</span>}
+      <SearchBar game={game} />
     </div>
   )
 }
 
-function Page({ children, search = true }: { children: React.ReactNode; search?: boolean }) {
+function Page({ children, search = false }: { children: React.ReactNode; search?: boolean }) {
+  const { pathname } = useLocation()
   return (
     <main className="main">
-      <TopBar search={search} />
-      <div className="content">{children}</div>
+      {search && <TopBar />}
+      <div className="content" key={pathname}>
+        <Suspense fallback={<div className="skeleton" style={{ height: 360 }} />}>{children}</Suspense>
+      </div>
     </main>
   )
 }
@@ -41,29 +49,28 @@ export default function App() {
       </div>
     )
   }
-  if (!games.data) return <div className="content muted">Loading…</div>
+  if (!games.data) return <div className="content muted mono">Loading…</div>
   return (
     <GamesContext.Provider value={games.data}>
       <BrowserRouter>
-        <div className="shell">
-          <Sidebar />
-          <Routes>
-            {/* Home pages have their own hero search, so the top bar omits it. */}
-            <Route path="/" element={<Page search={false}><Home /></Page>} />
-            <Route path="/:game" element={<Page search={false}><Home /></Page>} />
-            <Route
-              path="/:game/p/:key"
-              element={
-                <Page>
-                  <Suspense fallback={<div className="skeleton" style={{ height: 320 }} />}>
-                    <ProfilePage />
-                  </Suspense>
-                </Page>
-              }
-            />
-            <Route path="*" element={<Page><div className="card empty">Page not found. <Link to="/">Go home</Link></div></Page>} />
-          </Routes>
-        </div>
+        <DesktopProvider>
+          <Titlebar />
+          <div className="shell">
+            <Rail />
+            <Routes>
+              <Route path="/" element={<Page><Home /></Page>} />
+              <Route path="/library" element={<Page><Library /></Page>} />
+              <Route path="/library/:id" element={<Page><GameDetail /></Page>} />
+              <Route path="/clips" element={<Page><Clips /></Page>} />
+              <Route path="/playtime" element={<Page><Playtime /></Page>} />
+              <Route path="/settings" element={<Page><SettingsPage /></Page>} />
+              <Route path="/stats" element={<Page><StatsHub /></Page>} />
+              <Route path="/:game" element={<Page><StatsHub /></Page>} />
+              <Route path="/:game/p/:key" element={<Page search><ProfilePage /></Page>} />
+              <Route path="*" element={<Page><div className="card empty">Page not found. <Link to="/">Go home</Link></div></Page>} />
+            </Routes>
+          </div>
+        </DesktopProvider>
       </BrowserRouter>
     </GamesContext.Provider>
   )

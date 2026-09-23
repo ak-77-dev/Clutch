@@ -33,6 +33,17 @@ STEAM_DEFAULT = Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)
 
 # Steam tools that show up as "apps" but aren't games.
 STEAM_SKIP = re.compile(r"redistributable|steamworks|proton|steam linux runtime|dedicated server|\bsdk\b", re.I)
+# Apps sold on Steam that run for hours but aren't games: hidden by default, so they
+# don't count as playtime or keep the replay buffer armed. Players can unhide them.
+NOT_GAMES = {
+    "steam:431960",  # Wallpaper Engine
+    "steam:250820",  # SteamVR
+    "steam:1905180",  # OBS Studio
+    "steam:993090",  # Lossless Scaling
+    "steam:629520",  # Soundpad
+    "steam:388080",  # Borderless Gaming
+    "steam:365670",  # Blender
+}
 
 RIOT_PRODUCTS = {
     "valorant": "VALORANT",
@@ -327,6 +338,7 @@ class Library:
         self.games: dict[str, Game] = {}
         self.custom: dict[str, Game] = {}
         self.hidden: set[str] = set()  # games the player hid from the library (tools, stale installs)
+        self.shown: set[str] = set()  # known non-games the player chose to unhide
         self._load()
 
     def _load(self) -> None:
@@ -337,12 +349,14 @@ class Library:
         self.games = {g["id"]: Game(**g) for g in data.get("games", [])}
         self.custom = {g["id"]: Game(**g) for g in data.get("custom", [])}
         self.hidden = set(data.get("hidden", []))
+        self.shown = set(data.get("shown", []))
 
     def _save(self) -> None:
         payload = {
             "games": [g.to_dict() for g in self.games.values()],
             "custom": [g.to_dict() for g in self.custom.values()],
             "hidden": sorted(self.hidden),
+            "shown": sorted(self.shown),
         }
         self.cache.write_text(json.dumps(payload, indent=1), encoding="utf-8")
 
@@ -366,6 +380,8 @@ class Library:
                 found[g.id] = g
                 if key:
                     seen_dirs.add(key)
+        # Known non-games stay hidden unless the player explicitly unhid them.
+        self.hidden |= {gid for gid in found if gid in NOT_GAMES and gid not in self.shown}
         self.games = found
         self._save()
         return self.all()
@@ -377,6 +393,7 @@ class Library:
     def set_hidden(self, game_id: str, hidden: bool) -> None:
         self.get(game_id)
         (self.hidden.add if hidden else self.hidden.discard)(game_id)
+        (self.shown.discard if hidden else self.shown.add)(game_id)
         self._save()
 
     def get(self, game_id: str) -> Game:

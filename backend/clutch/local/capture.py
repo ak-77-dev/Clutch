@@ -68,6 +68,92 @@ def run_ffmpeg(args: list[str], timeout: float = 120) -> subprocess.CompletedPro
     )
 
 
+class _KillOnCloseJob:  # pragma: no cover - Windows kernel objects
+    """A Windows Job Object that kills its processes when Clutch's backend dies.
+
+    FFmpeg records until told to stop. If the backend crashes or is killed, a
+    plain child process would keep recording (and filling the disk) forever; a
+    job with KILL_ON_JOB_CLOSE is torn down by Windows along with our handle.
+    """
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        self._k32 = k32
+        self.handle = k32.CreateJobObjectW(None, None)
+
+        class Basic(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class Io(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in ("r", "w", "o", "rb", "wb", "ob")]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", Basic),
+                ("IoInfo", Io),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        info = Extended()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        k32.SetInformationJobObject(self.handle, 9, ctypes.byref(info), ctypes.sizeof(info))  # 9 = ExtendedLimitInformation
+
+    def add(self, proc: subprocess.Popen) -> None:
+        self._k32.AssignProcessToJobObject(self.handle, int(proc._handle))  # type: ignore[attr-defined]
+
+
+_job: _KillOnCloseJob | None = None
+
+
+def _bind_to_backend(proc: subprocess.Popen) -> None:
+    """Make Windows kill ``proc`` if this process dies without stopping it."""
+    global _job
+    if os.name != "nt":
+        return
+    try:  # pragma: no cover - Windows only
+        _job = _job or _KillOnCloseJob()
+        _job.add(proc)
+    except Exception:
+        pass  # best effort: stale-recorder cleanup at startup is the fallback
+
+
+def kill_stale_recorders(spool_root: Path) -> int:
+    """Stop FFmpeg processes still writing into Clutch's spool from a run that crashed."""
+    try:
+        import psutil
+    except ImportError:
+        return 0
+    root = os.path.normcase(str(spool_root))
+    killed = 0
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            name = (proc.info.get("name") or "").lower()
+            cmd = " ".join(proc.info.get("cmdline") or [])
+            if name.startswith("ffmpeg") and root in os.path.normcase(cmd):
+                proc.kill()
+                killed += 1
+        except (psutil.Error, OSError):
+            continue
+    return killed
+
+
 _encoder_cache: dict[str, str] = {}
 
 
@@ -359,6 +445,7 @@ class ReplayBuffer:
                 stdout=subprocess.DEVNULL,
                 creationflags=CREATE_NO_WINDOW,
             )
+            _bind_to_backend(self.proc)
             threading.Thread(target=self._drain_stderr, args=(self.proc,), daemon=True).start()
             self.tracks = self.audio_factory(self.spool, self.cfg.system_audio, self.cfg.mic)
             self.started_at = time.time()
@@ -391,7 +478,8 @@ class ReplayBuffer:
             shutil.rmtree(spool, ignore_errors=True)
 
     def cleanup_stale(self) -> None:
-        """Remove spools left by a previous run that crashed."""
+        """Stop recorders and remove spools left by a previous run that crashed."""
+        kill_stale_recorders(self.spool_root)
         for d in self.spool_root.glob("buffer_*"):
             if d != self.spool:
                 shutil.rmtree(d, ignore_errors=True)

@@ -78,9 +78,7 @@ def compare_windows(meta: GameMeta, matches: Sequence[Match], window: int = 20) 
     return {"window": window, "stats": stats}
 
 
-def rolling(
-    matches: Sequence[Match], fn: Callable[[Match], float | None], window: int = 10, min_periods: int = 3
-) -> list[float | None]:
+def rolling(matches: Sequence[Match], fn: Callable[[Match], float | None], window: int = 10, min_periods: int = 3) -> list[float | None]:
     """Trailing mean; ``None`` until ``min_periods`` values exist (one game isn't a trend)."""
     out: list[float | None] = []
     buf: list[float] = []

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clutch"
 version = "0.1.0"
-description = "Multi-game stats hub API (League of Legends, Valorant, Rocket League, Dota 2, Deadlock)."
+description = "Multi-game stats hub, game launcher, playtime tracker and clipping app."
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115",
@@ -16,7 +16,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "httpx>=0.27", "ruff>=0.6"]
+# Desktop app (clutch serve --desktop): launcher, playtime, clipping, media hub.
+desktop = [
+  "psutil>=5.9",
+  "imageio-ffmpeg>=0.5",  # bundles FFmpeg 7 (ddagrab + NVENC/AMF/QSV)
+  "pillow>=10",
+  "icoextract>=0.1.4",
+  "send2trash>=1.8",
+  "pyaudiowpatch>=0.2.12; sys_platform == 'win32'",  # WASAPI loopback (game audio)
+]
+dev = ["pytest>=8", "pytest-cov>=5", "httpx>=0.27", "ruff>=0.6", "imageio-ffmpeg>=0.5", "pillow>=10", "psutil>=5.9", "send2trash>=1.8"]
 
 [project.scripts]
 clutch = "clutch.cli:main"

@@ -669,3 +669,88 @@ def deadlock_matches() -> list[dict[str, Any]]:
     import copy
 
     return copy.deepcopy(list(_deadlock_matches_cached()))
+
+
+# ── Call of Duty ─────────────────────────────────────────────────────────────
+# Shape of callofduty.com's ``matches/mp/.../details`` entries. Accuracy and
+# damage drive wins; Search and Destroy is the mode this player struggles in.
+
+COD_DEMO_PROFILE: dict[str, Any] = {
+    "game": "cod",
+    "key": "uno:Nightfall#8123456",
+    "name": "Nightfall",
+    "tag": "8123456",
+    "level": 55,
+    "region": "Activision ID",
+    "demo": True,
+    "ranks": [
+        {"queue": "Black Ops 7", "label": "Prestige 3", "tier": "prestige", "lp": None, "value": 355.0, "wins": None, "losses": None}
+    ],
+}
+COD_MODES = [("war", 35), ("dom", 25), ("hp", 20), ("sd", 12), ("conf", 8)]
+
+
+@lru_cache(maxsize=1)
+def _cod_matches_cached(games: int = 130, seed: int = 17) -> tuple[dict[str, Any], ...]:
+    rng = random.Random(seed)
+    out = []
+    n = 0
+    for start, count in _sessions(rng, games):
+        clock = start
+        for idx in range(count):
+            n += 1
+            mode = rng.choices([m for m, _ in COD_MODES], weights=[w for _, w in COD_MODES])[0]
+            form = rng.gauss(0, 1) - 0.2 * max(0, idx - 2)
+            p_win = 1 / (1 + math.exp(-(0.9 * form + 0.6 * n / games - 0.2 - (0.5 if mode == "sd" else 0))))
+            won = rng.random() < p_win
+            minutes = {"sd": rng.uniform(9, 16), "war": rng.uniform(8, 11)}.get(mode, rng.uniform(9, 13))
+            kills = _poisson(rng, minutes * (2.0 + 0.4 * form + (0.3 if won else 0)) * (0.45 if mode == "sd" else 1))
+            deaths = _poisson(rng, minutes * max(0.6, 1.9 - 0.35 * form - (0.25 if won else 0)) * (0.45 if mode == "sd" else 1))
+            shots = int(max(40, rng.gauss(55, 10) * minutes))
+            acc = min(0.45, max(0.08, rng.gauss(0.21 + 0.03 * form + (0.015 if won else 0), 0.025)))
+            team = rng.choice(("allies", "axis"))
+            win_score, lose_score = {
+                "war": (100, rng.randint(55, 95)),
+                "dom": (200, rng.randint(90, 190)),
+                "hp": (250, rng.randint(120, 240)),
+                "sd": (6, rng.randint(1, 5)),
+                "conf": (65, rng.randint(35, 60)),
+            }[mode]
+            mine, theirs = (win_score, lose_score) if won else (lose_score, win_score)
+            t1, t2 = (mine, theirs) if team == "allies" else (theirs, mine)
+            score = int(kills * 100 + rng.uniform(300, 1500) + (500 if won else 0))
+            out.append(
+                {
+                    "matchID": str(9_100_000_000_000_000 + n * 7_777_777),
+                    "utcStartSeconds": int(clock.timestamp()),
+                    "utcEndSeconds": int(clock.timestamp() + minutes * 60),
+                    "mode": mode,
+                    "map": None,
+                    "result": "win" if won else "loss",
+                    "team1Score": t1,
+                    "team2Score": t2,
+                    "player": {"team": team, "username": COD_DEMO_PROFILE["name"]},
+                    "playerStats": {
+                        "kills": kills,
+                        "deaths": deaths,
+                        "assists": _poisson(rng, minutes * 0.6),
+                        "headshots": int(kills * min(0.5, max(0.05, rng.gauss(0.2 + 0.03 * form, 0.05)))),
+                        "score": score,
+                        "scorePerMinute": round(score / minutes, 1),
+                        "damageDone": int(minutes * max(80, rng.gauss(310 + 50 * form + (25 if won else 0), 45))),
+                        "damageTaken": int(minutes * max(80, rng.gauss(330 - 40 * form, 45))),
+                        "shotsFired": shots,
+                        "shotsLanded": int(shots * acc),
+                        "longestStreak": max(0, int(rng.gauss(4 + 1.5 * form, 2))),
+                        "timePlayed": int(minutes * 60),
+                    },
+                }
+            )
+            clock += timedelta(minutes=minutes + rng.uniform(1.5, 4))
+    return tuple(out)
+
+
+def cod_matches() -> list[dict[str, Any]]:
+    import copy
+
+    return copy.deepcopy(list(_cod_matches_cached()))

@@ -297,3 +297,52 @@ def test_deadlock_fetch_attaches_player_names():
     assert all(p["name"] == f"p{p['account_id']}" for p in slim["players"])
     d.fetch_match(Profile(game="deadlock", key="1", name="x"), "1")
     assert len(calls) == 3  # names are cached across matches
+
+
+# ── Call of Duty (experimental) ─────────────────────────────────────────────
+
+
+def test_cod_player_ids():
+    from clutch.games.cod import parse_player_id
+    from clutch.http import NotFound
+
+    assert parse_player_id("Nightfall#8123456") == ("uno", "Nightfall#8123456")
+    assert parse_player_id("Nightfall#1234") == ("battle", "Nightfall#1234")
+    assert parse_player_id("psn:Some Name") == ("psn", "Some Name")
+    with pytest.raises(NotFound):
+        parse_player_id("no tag at all")
+
+
+def test_cod_parse_and_auth_errors():
+    from clutch.games.cod import CodProvider
+    from clutch.games.demo_data import COD_DEMO_PROFILE, cod_matches
+    from clutch.http import NotFound
+
+    cod = CodProvider(token="")
+    prof = Profile(**copy.deepcopy(COD_DEMO_PROFILE))
+    raw = cod_matches()[0]
+    m = cod.parse(raw, prof)
+    st = raw["playerStats"]
+    assert m.metrics["kd"] == round(st["kills"] / max(st["deaths"], 1), 2)
+    assert m.metrics["accuracy"] == pytest.approx(100 * st["shotsLanded"] / st["shotsFired"], abs=0.1)
+    assert m.result == raw["result"] and m.character == m.mode
+    assert not cod.configured()
+
+    class Denied:
+        def get(self, url, params=None):
+            return {"status": "error", "data": {"message": "Not permitted: not authenticated"}}
+
+    with pytest.raises(NotFound, match="SSO token"):
+        CodProvider(token="x", client=Denied()).resolve("Name#1234567")
+
+    class Ok:
+        def get(self, url, params=None):
+            if url.endswith("/profile/type/mp"):
+                return {"status": "success", "data": {"level": 42, "prestige": 2}}
+            return {"status": "success", "data": {"matches": [raw]}}
+
+    live = CodProvider(token="x", title="bo7", client=Ok())
+    p = live.resolve("Name#1234567")
+    assert p.key == "uno:Name#1234567" and p.ranks[0]["label"] == "Prestige 2"
+    assert live.list_match_ids(p, 10) == [raw["matchID"]]
+    assert live.fetch_match(p, raw["matchID"]) is raw

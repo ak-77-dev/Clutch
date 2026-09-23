@@ -1,0 +1,104 @@
+"""Where Clutch keeps local data, and the user's desktop settings."""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
+from typing import Any
+
+
+def data_dir() -> Path:
+    """``$CLUTCH_HOME``, else ``%APPDATA%/Clutch`` (``~/.clutch`` off Windows)."""
+    if os.environ.get("CLUTCH_HOME"):
+        base = Path(os.environ["CLUTCH_HOME"])
+    elif os.environ.get("APPDATA"):
+        base = Path(os.environ["APPDATA"]) / "Clutch"
+    else:
+        base = Path.home() / ".clutch"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def default_clips_dir() -> Path:
+    videos = Path.home() / "Videos"
+    return (videos if videos.is_dir() else data_dir()) / "Clutch"
+
+
+@dataclass
+class Settings:
+    # Clipping
+    clips_dir: str = ""
+    buffer_seconds: int = 60  # how far back a clip reaches
+    fps: int = 60
+    quality: str = "high"  # low | medium | high | ultra
+    encoder: str = "auto"  # auto | nvenc | amf | qsv | x264
+    monitor: int = 0
+    record_system_audio: bool = True
+    record_mic: bool = False
+    auto_buffer: bool = True  # start the replay buffer whenever a known game is running
+    # Hotkeys (Electron accelerator syntax)
+    hotkey_clip: str = "F8"
+    hotkey_record: str = "F9"
+    hotkey_screenshot: str = "F10"
+    # App behavior
+    start_with_windows: bool = False
+    minimize_to_tray: bool = True
+    notify_sessions: bool = True
+    auto_sync_on_exit: bool = True  # refresh linked stats when a tracked game closes
+    # game id -> player key, so "my stats" and auto-sync know who you are
+    linked_profiles: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.clips_dir:
+            self.clips_dir = str(default_clips_dir())
+
+
+QUALITY_CQ = {"low": 30, "medium": 26, "high": 22, "ultra": 18}
+
+
+class SettingsStore:
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path or data_dir() / "settings.json"
+        self._lock = threading.Lock()
+        self._listeners: list = []
+        self.settings = self._load()
+
+    def _load(self) -> Settings:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return Settings()
+        known = {f.name for f in fields(Settings)}
+        return Settings(**{k: v for k, v in raw.items() if k in known})
+
+    def get(self) -> Settings:
+        return self.settings
+
+    def update(self, changes: dict[str, Any]) -> Settings:
+        known = {f.name: f for f in fields(Settings)}
+        with self._lock:
+            data = asdict(self.settings)
+            for key, value in changes.items():
+                if key not in known:
+                    raise ValueError(f"Unknown setting: {key}")
+                current = data[key]
+                if isinstance(current, bool) and not isinstance(value, bool):
+                    raise ValueError(f"{key} must be true or false")
+                if isinstance(current, int) and not isinstance(current, bool) and not isinstance(value, int):
+                    raise ValueError(f"{key} must be a number")
+                data[key] = value
+            if data["buffer_seconds"] not in range(10, 601):
+                raise ValueError("buffer_seconds must be between 10 and 600")
+            if data["quality"] not in QUALITY_CQ:
+                raise ValueError(f"quality must be one of {', '.join(QUALITY_CQ)}")
+            self.settings = Settings(**data)
+            self.path.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
+        for fn in self._listeners:
+            fn(self.settings)
+        return self.settings
+
+    def on_change(self, fn) -> None:
+        self._listeners.append(fn)

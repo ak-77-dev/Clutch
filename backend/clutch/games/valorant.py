@@ -66,8 +66,11 @@ MAPS: dict[str, str] = {
     "Haven": "2bee0dc9-4ffe-519b-1cbd-7fbe763a6047",
     "Corrode": "1c18ab1f-420d-0d8b-71d0-77ad3c439115",
 }
-# Played to a kill target, not rounds: per-round stats (ACS, ADR) are meaningless and would skew averages.
+# Played to a kill target, not rounds: per-round stats (ACS, ADR, ...) are meaningless there.
+# Team Deathmatch still has teams and a result, so it's kept with those stats left blank;
+# free-for-all Deathmatch has neither and is skipped.
 NON_ROUND_MODES = {"Deathmatch", "Team Deathmatch"}
+SKIPPED_MODES = {"Deathmatch"}
 TIER_NAMES = [
     "Unranked",
     "Unused1",
@@ -218,13 +221,18 @@ class ValorantProvider(GameProvider):
 
     def parse(self, raw: dict[str, Any], profile: Profile) -> Match | None:
         md = raw["metadata"]
-        if md.get("mode") in NON_ROUND_MODES:
+        if md.get("mode") in SKIPPED_MODES:
             return None
+        by_round = md.get("mode") not in NON_ROUND_MODES
         players = (raw.get("players") or {}).get("all_players") or []
         me = next((p for p in players if p.get("puuid") == profile.key), None)
         if me is None:
             return None
         rounds = max(int(md.get("rounds_played") or 0), 1)
+
+        def per_round(v: float, digits: int = 1) -> float | None:
+            return round(v / rounds, digits) if by_round else None
+
         st = me.get("stats") or {}
         k, d, a = st.get("kills", 0), st.get("deaths", 0), st.get("assists", 0)
         shots = (st.get("headshots", 0) + st.get("bodyshots", 0) + st.get("legshots", 0)) or 1
@@ -255,9 +263,9 @@ class ValorantProvider(GameProvider):
                 rank=p.get("currenttier_patched"),
                 extra={"won": bool((teams.get((p.get("team") or "").lower()) or {}).get("has_won"))},
                 stats={
-                    "ACS": round((p.get("stats") or {}).get("score", 0) / rounds),
+                    "ACS": per_round((p.get("stats") or {}).get("score", 0), 0),
                     "K/D/A": f"{(p.get('stats') or {}).get('kills', 0)}/{(p.get('stats') or {}).get('deaths', 0)}/{(p.get('stats') or {}).get('assists', 0)}",
-                    "ADR": round((p.get("damage_made") or 0) / rounds),
+                    "ADR": per_round(p.get("damage_made") or 0, 0),
                 },
             )
             for p in sorted(players, key=lambda p: (p.get("team", ""), -(p.get("stats") or {}).get("score", 0)))
@@ -278,11 +286,11 @@ class ValorantProvider(GameProvider):
                 "deaths": d,
                 "assists": a,
                 "kd": round(k / max(d, 1), 2),
-                "acs": round(st.get("score", 0) / rounds, 1),
-                "adr": round((me.get("damage_made") or 0) / rounds, 1),
+                "acs": per_round(st.get("score", 0)),
+                "adr": per_round(me.get("damage_made") or 0),
                 "hs_pct": round(100 * st.get("headshots", 0) / shots, 1),
-                "deaths_per_round": round(d / rounds, 3),
-                "assists_per_round": round(a / rounds, 3),
+                "deaths_per_round": per_round(d, 3),
+                "assists_per_round": per_round(a, 3),
             },
             rank_label=tier_name(tier) if md.get("mode") == "Competitive" else None,
             rank_value=float(tier) if md.get("mode") == "Competitive" and tier else None,

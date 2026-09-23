@@ -33,8 +33,16 @@ class Settings:
     clips_dir: str = ""
     buffer_seconds: int = 60  # how far back a clip reaches
     fps: int = 60
-    quality: str = "high"  # low | medium | high | ultra
-    encoder: str = "auto"  # auto | nvenc | amf | qsv | x264
+    quality: str = "high"  # low | medium | high | ultra | max
+    encoder: str = "auto"  # auto | nvenc | amf | qsv | x264 (CPU)
+    codec: str = "h264"  # h264 (plays everywhere) | hevc (~half the size) | av1 (RTX 40 / RX 7000 / Arc)
+    preset: str = "balanced"  # speed | balanced | quality: encoder effort
+    rate_control: str = "quality"  # quality (constant quality) | bitrate (target Mbps)
+    bitrate_mbps: int = 50
+    resolution: str = "native"  # native | 1440 | 1080 | 720
+    audio_kbps: int = 192
+    audio_device: str = "default"  # "default" follows Windows' default output; or a device name
+    mic_device: str = "default"
     monitor: int = 0
     record_system_audio: bool = True
     record_mic: bool = False
@@ -56,7 +64,16 @@ class Settings:
             self.clips_dir = str(default_clips_dir())
 
 
-QUALITY_CQ = {"low": 30, "medium": 26, "high": 22, "ultra": 18}
+CHOICES = {
+    "quality": ("low", "medium", "high", "ultra", "max"),
+    "encoder": ("auto", "nvenc", "amf", "qsv", "x264"),
+    "codec": ("h264", "hevc", "av1"),
+    "preset": ("speed", "balanced", "quality"),
+    "rate_control": ("quality", "bitrate"),
+    "resolution": ("native", "1440", "1080", "720"),
+    "fps": (30, 60, 120, 144),
+    "audio_kbps": (128, 192, 256, 320),
+}
 
 
 class SettingsStore:
@@ -92,8 +109,11 @@ class SettingsStore:
                 data[key] = value
             if data["buffer_seconds"] not in range(10, 601):
                 raise ValueError("buffer_seconds must be between 10 and 600")
-            if data["quality"] not in QUALITY_CQ:
-                raise ValueError(f"quality must be one of {', '.join(QUALITY_CQ)}")
+            for key, allowed in CHOICES.items():
+                if data[key] not in allowed:
+                    raise ValueError(f"{key} must be one of {', '.join(map(str, allowed))}")
+            if not 5 <= data["bitrate_mbps"] <= 150:
+                raise ValueError("bitrate_mbps must be between 5 and 150")
             self.settings = Settings(**data)
             self.path.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
         for fn in self._listeners:

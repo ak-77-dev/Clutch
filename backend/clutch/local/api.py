@@ -109,6 +109,10 @@ def router(desktop: Desktop) -> APIRouter:
         threading.Timer(0.3, os._exit, args=(0,)).start()
         return {"ok": True}
 
+    @r.get("/capabilities")
+    def capabilities() -> dict[str, Any]:
+        return desktop.capabilities()
+
     # ── settings ────────────────────────────────────────────────────────────
     @r.get("/settings")
     def get_settings() -> dict[str, Any]:

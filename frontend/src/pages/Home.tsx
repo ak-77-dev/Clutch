@@ -40,7 +40,7 @@ function Dashboard() {
     return { lib, clips: clips.items, pt }
   }, [])
   useDesktopEvents((e) => {
-    if (e.type === 'clip_saved' || e.type === 'session_end' || e.type === 'game_started') data.reload()
+    if (e.type === 'clip_saved' || e.type === 'clip_updated' || e.type === 'session_end' || e.type === 'game_started') data.reload()
   })
   const linked = Object.entries(settings?.linked_profiles ?? {})
   const ticker = useAsync(async () => {

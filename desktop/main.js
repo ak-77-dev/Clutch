@@ -6,7 +6,7 @@ const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { findPython, freePort, parseSSE, overlayFor, sessionNotification } = require('./lib')
+const { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification } = require('./lib')
 
 const ROOT = path.resolve(__dirname, '..')
 const BACKEND_DIR = process.env.CLUTCH_BACKEND_DIR || path.join(ROOT, 'backend')
@@ -189,6 +189,8 @@ function refreshTray() {
 
 async function action(kind) {
   const route = { clip: '/api/desktop/capture/clip', record: '/api/desktop/capture/record', screenshot: '/api/desktop/capture/screenshot' }[kind]
+  // Feedback first: the sound and toast land on the key press, not after the file is written.
+  if (!(win && win.isFocused())) flash(pressFeedback(kind, settings, buffer.recording))
   try {
     await call(route, { method: 'POST', body: '{}' })
   } catch (err) {

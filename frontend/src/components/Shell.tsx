@@ -55,10 +55,13 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
 
   useDesktopEvents((e: DesktopEvent) => {
     refresh()
-    if (e.type === 'clip_saved') {
+    if (e.type === 'clip_saving') {
+      toast({ title: 'Clipping…', sub: e.game_name ?? 'Desktop' })
+    } else if (e.type === 'clip_saved') {
       const c: Clip = e.clip
       const label = c.kind === 'screenshot' ? 'Screenshot saved' : c.kind === 'recording' ? 'Recording saved' : 'Clip saved'
-      toast({ title: label, sub: `${c.game_name ?? 'Desktop'}${c.duration ? ` · ${Math.round(c.duration)}s` : ''}`, thumb: desktop.clipThumb(c.id), onClick: () => navigate(`/clips?open=${c.id}`) })
+      // The thumbnail is rendered just after the clip is announced, so it isn't shown here.
+      toast({ title: label, sub: `${c.game_name ?? 'Desktop'}${c.duration ? ` · ${Math.round(c.duration)}s` : ''}`, onClick: () => navigate(`/clips?open=${c.id}`) })
     } else if (e.type === 'game_started') {
       toast({ title: `${e.game_name} is running`, sub: 'Tracking playtime · replay buffer armed' })
     } else if (e.type === 'session_end') {

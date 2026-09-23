@@ -147,3 +147,24 @@ export function accelerator(e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 
   if (!mods.length && /^[A-Z0-9]$/.test(key)) return null
   return [...mods, key].join('+')
 }
+
+/**
+ * Rough recording size for fast-moving gameplay (what the Settings page shows).
+ * Constant-quality rates come from typical NVENC output for 1080p60 action games.
+ */
+export function estimateSize(
+  s: { rate_control: string; bitrate_mbps: number; quality: string; codec: string; resolution: string; fps: number; buffer_seconds: number },
+  monitorHeight = 1080,
+): { mbps: number; perClip: string } {
+  let mbps: number
+  if (s.rate_control === 'bitrate') {
+    mbps = s.bitrate_mbps
+  } else {
+    const base: Record<string, number> = { low: 8, medium: 15, high: 28, ultra: 45, max: 75 }
+    const codec: Record<string, number> = { h264: 1, hevc: 0.6, av1: 0.5 }
+    const height = s.resolution === 'native' ? monitorHeight : Number(s.resolution)
+    mbps = (base[s.quality] ?? 28) * (codec[s.codec] ?? 1) * (height / 1080) ** 2 * (s.fps / 60) ** 0.8
+  }
+  mbps = Math.round(mbps)
+  return { mbps, perClip: fmtBytes((mbps * 1e6 * s.buffer_seconds) / 8) }
+}

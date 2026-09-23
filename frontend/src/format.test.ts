@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { accelerator, deltaInfo, fmtBytes, fmtClock, fmtDuration, fmtHours, fmtValue, hoursNumber, monogram, plural, timeAgo } from './format'
+import { accelerator, deltaInfo, estimateSize, fmtBytes, fmtClock, fmtDuration, fmtHours, fmtValue, hoursNumber, monogram, plural, timeAgo } from './format'
 
 describe('format', () => {
   it('pluralizes character labels', () => {
@@ -49,5 +49,12 @@ describe('format', () => {
     expect(k('F8', 'F8')).toBe('F8')
     expect(k('KeyK', 'k', { altKey: true })).toBe('Alt+K')
     expect(k('KeyK', 'k')).toBeNull() // bare letters would fire while typing
+  })
+
+  it('estimates recording size', () => {
+    const s = { rate_control: 'quality', bitrate_mbps: 50, quality: 'high', codec: 'h264', resolution: '1080', fps: 60, buffer_seconds: 60 }
+    expect(estimateSize(s).mbps).toBe(28)
+    expect(estimateSize({ ...s, codec: 'hevc' }).mbps).toBeLessThan(estimateSize(s).mbps)
+    expect(estimateSize({ ...s, rate_control: 'bitrate' })).toEqual({ mbps: 50, perClip: '358 MB' })
   })
 })

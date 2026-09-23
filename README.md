@@ -107,10 +107,10 @@ Games found by several sources are deduplicated by install folder. Stale entries
 
 ### Clipping
 
-- **Video.** One long-running FFmpeg grabs the screen with the Desktop Duplication API (`ddagrab`) and encodes on the GPU. The first of NVENC → AMF → Quick Sync that actually initializes is used, with x264 as the fallback. It writes 1-second MPEG-TS segments with a keyframe every second into a spool folder.
-- **Audio.** WASAPI loopback (and optionally the mic) is spooled as raw PCM on a wall-clock timeline. Windows sends *no* loopback packets while nothing is playing, so silence is filled in by timestamp. Without that, every quiet moment would pull later audio out of sync.
-- **Saving.** A clip is "the last N segments + the matching PCM", stitched with a stream copy, so saving takes **~0.3 s** with no re-encode. Recording is the same thing with pruning paused.
-- **Sync.** Measured with a test that flashes the screen and plays a click at the same instant: **±10 ms**, under a frame at 60 fps, after correcting a constant 45 ms pipeline delay.
+- **Video.** One long-running FFmpeg grabs the screen with the Desktop Duplication API (`ddagrab`) and encodes on the GPU in H.264, HEVC or AV1. The first of NVENC → AMF → Quick Sync that actually initializes is used, with x264/x265 on the CPU as the fallback. It writes 1-second MPEG-TS segments with a keyframe every second into a spool folder. Options: constant quality (low → max) or a target bitrate, 30–144 fps, native/1440p/1080p/720p, and encoder effort (speed / balanced / quality with multipass). Temporal AQ and lookahead stay off on purpose: they make NVENC hold frames back, which broke A/V timing in testing.
+- **Audio.** WASAPI loopback (and optionally the mic) is spooled as raw PCM on a wall-clock timeline, and at the same time encoded to AAC by a live encoder in 1-second segments. Windows sends *no* loopback packets while nothing is playing, so silence is filled in by timestamp. A watchdog follows the default device (Bluetooth headsets switch endpoints whenever a mic turns on) and reopens streams that go quiet, because a WASAPI stream on an invalidated device stops delivering without an error. That silent failure is what produced silent clips before the watchdog existed.
+- **Saving.** A clip is the last N video segments streamed into one MPEG-TS input (TS joins byte-for-byte; the concat demuxer cost ~35 ms per segment) plus the already-encoded AAC. Both are stream-copied, so a clip saves in **~0.4 s** in the running app. The hotkey's sound and toast fire on the key press itself, not when the file is done.
+- **Sync.** Video segments are timed by creation time, corrected for a measured 45 ms pipeline delay (flash + click test: **±10 ms**). Stream-copied AAC can only start on a 1024-sample frame, so whole segments are used and the track is shifted by the exact amount, with the MP4 edit list hiding the lead-in (tested offline: −1.3 ms). The measured 2048-sample AAC delay is included.
 - **Crash safety.** FFmpeg is bound to the backend with a Windows Job Object (`KILL_ON_JOB_CLOSE`), so a crashed backend can't leave a recorder filling the disk. Startup also sweeps for stray recorders from older runs.
 
 ### Security
@@ -133,7 +133,7 @@ The Electron window runs sandboxed with context isolation. Links to other sites 
 ## Development
 
 ```bash
-cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 65 tests
+cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 71 tests
 cd frontend && npm test && npm run typecheck && npm run build
 cd desktop  && npm run check                                                  # syntax + node:test
 ```

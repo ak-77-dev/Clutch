@@ -209,25 +209,40 @@ def test_playtime_sessions_events_and_daily_split(tmp_path):
 # ── audio timeline ───────────────────────────────────────────────────────────
 
 
+def _samples(path):
+    with wave.open(str(path)) as w:
+        assert (w.getframerate(), w.getnchannels()) == (48000, 2)  # clips always get 48 kHz stereo
+        return memoryview(w.readframes(w.getnframes())).cast("h")
+
+
 def test_audio_track_fills_gaps_and_extracts_by_wall_clock(tmp_path):
-    rate = 1000
-    track = AudioTrack("system", tmp_path, rate, 1)
-    tone = (1000).to_bytes(2, "little", signed=True) * 500  # 0.5 s of a constant sample
+    track = AudioTrack("system", tmp_path)  # 48 kHz stereo, like most devices
+    tone = (1000).to_bytes(2, "little", signed=True) * (24_000 * 2)  # 0.5 s of a constant sample
     track.write(100.5, tone)  # covers 100.0-100.5
     track.fill_silence(101.5)  # nothing playing for a second
     track.write(102.0, tone)  # covers 101.5-102.0
-    out = track.extract(100.25, 102.0, tmp_path / "out.wav")
-    with wave.open(str(out)) as w:
-        samples = memoryview(w.readframes(w.getnframes())).cast("h")
-    assert len(samples) == 1750
-    assert samples[0] == 1000 and samples[249] == 1000  # the tail of the first tone
-    assert samples[300] == 0 and samples[1200] == 0  # silence filled by wall clock
-    assert samples[1300] == 1000 and samples[-1] == 1000  # the second tone lands at 101.5 s
+    s = _samples(track.extract(100.25, 102.0, tmp_path / "out.wav"))
+    frame = lambda t: 2 * int(t * 48000)  # noqa: E731 - sample index of the left channel at t seconds in
+    assert len(s) == frame(1.75)
+    assert s[0] == 1000 and s[frame(0.24)] == 1000  # the tail of the first tone
+    assert s[frame(0.3)] == 0 and s[frame(1.2)] == 0  # silence filled by wall clock
+    assert s[frame(1.3)] == 1000 and s[-1] == 1000  # the second tone lands at 101.5 s
+    track.close()
+
+
+def test_audio_from_other_device_formats_is_converted(tmp_path):
+    track = AudioTrack("mic", tmp_path, rate=24_000, channels=1)  # e.g. a Bluetooth headset mic
+    ramp = b"".join(v.to_bytes(2, "little", signed=True) for v in range(0, 24_000))  # 1 s, distinct values
+    track.write(11.0, ramp)
+    s = _samples(track.extract(10.0, 11.0, tmp_path / "m.wav"))
+    assert len(s) == 2 * 48000  # 1 s at 48 kHz stereo
+    assert s[0] == s[1] == 0 and s[2 * 48000 - 2] == s[2 * 48000 - 1] == 23_999  # mono copied to both ears
+    assert s[2 * 24000] == 12_000  # half-way through is half-way up the ramp: timing survives resampling
     track.close()
 
 
 def test_audio_track_rotates_and_prunes_files(tmp_path):
-    track = AudioTrack("mic", tmp_path, 100, 1)
+    track = AudioTrack("mic", tmp_path, rate=100, channels=1)
     track.FILE_S = 1.0
     for i in range(5):
         track.write(10.0 + (i + 1) * 0.5, b"\x01\x00" * 50)
@@ -422,3 +437,44 @@ def test_stale_recorders_from_a_crashed_run_are_stopped(tmp_path):
         for p in (stray, other):
             if p.poll() is None:
                 p.kill()
+
+
+@pytest.mark.parametrize(("click_at", "clip_start"), [(3.0, 1.0), (3.0, 1.37), (5.2, 0.81), (4.4, 0.013)])
+def test_live_encoded_audio_stays_in_sync(tmp_path, click_at, clip_start):
+    """Stream-copied AAC must put a sound where it happened, relative to the clip's start."""
+    import math
+
+    track = AudioTrack("system", tmp_path, live_kbps=192)
+    t0 = 1000.0
+    tone = b"".join(int(12000 * math.sin(2 * math.pi * 1000 * i / 48000)).to_bytes(2, "little", signed=True) * 2 for i in range(960))
+    t = t0
+    for _ in range(400):  # 8 s of 20 ms chunks, with a 100 ms tone at click_at
+        t += 0.02
+        track.write(t, tone if t0 + click_at <= t - 0.02 < t0 + click_at + 0.1 else b"\x00" * 960 * 4)
+    track.encoder.proc.stdin.close()
+    track.encoder.proc.wait()
+
+    files, shift = track.live_window(t0 + clip_start)
+    listing = tmp_path / "a.txt"
+    listing.write_text("".join(f"file '{f.name}'\n" for f in files), encoding="utf-8")
+    out = tmp_path / "clip.mp4"
+    subprocess.run(
+        [ffmpeg_exe(), "-v", "error", "-y", "-f", "lavfi", "-i", "color=black:s=64x64:r=30:d=8",
+         "-itsoffset", f"{shift:.6f}", "-f", "concat", "-safe", "0", "-i", str(listing),
+         "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-c:a", "copy", "-bsf:a", "aac_adtstoasc", "-shortest", str(out)],
+        check=True,
+    )  # fmt: skip
+    subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(out), "-vn", "-ac", "1", str(tmp_path / "a.wav")], check=True)
+    with wave.open(str(tmp_path / "a.wav")) as w:
+        samples = memoryview(w.readframes(w.getnframes())).cast("h")
+    heard = next(i for i, v in enumerate(samples) if abs(v) > 3000) / 48000
+    assert abs(heard - (click_at - clip_start)) < 0.02  # within one AAC frame; measured -1.3 ms
+    track.close()
+
+
+def test_live_window_refuses_what_it_cannot_cover(tmp_path):
+    track = AudioTrack("system", tmp_path, live_kbps=128)
+    assert track.live_window(5.0) is None  # nothing encoded yet
+    track.write(100.02, b"\x00" * 960 * 4)
+    assert track.live_window(50.0) is None  # the encoder started after the clip would begin
+    track.close()

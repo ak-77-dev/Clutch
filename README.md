@@ -1,8 +1,8 @@
 # Clutch — a multi-game stats hub
 
-A Blitz.gg-style tracker for **League of Legends**, **Valorant** and **Rocket League**. Look up any player to get:
+A Blitz.gg-style tracker for **League of Legends**, **Valorant**, **Rocket League**, **Dota 2** and **Deadlock**. Look up any player to get:
 - match history with full scoreboards
-- their champion / agent / car pool
+- their champion / agent / car / hero pool
 - rank progression
 - trends over time
 - plain-English insights on **what actually separates their wins from their losses**
@@ -45,8 +45,10 @@ Copy `backend/.env.example` to `backend/.env` and add whichever keys you have:
 | League of Legends | `RIOT_API_KEY` (+ `LOL_PLATFORM`, default `na1`) | [developer.riotgames.com](https://developer.riotgames.com). Dev keys expire every 24h. |
 | Valorant | `HENRIK_API_KEY` | [HenrikDev API](https://docs.henrikdev.xyz). Riot's official Valorant match API is limited to approved production apps. |
 | Rocket League | `BALLCHASING_API_KEY` | [ballchasing.com/upload](https://ballchasing.com/upload) |
+| Dota 2 | none (optional `OPENDOTA_API_KEY` lifts the 60 req/min cap) | [OpenDota](https://docs.opendota.com). The player needs "Expose Public Match Data" on in the Dota client. |
+| Deadlock | none | [deadlock-api.com](https://api.deadlock-api.com/docs) |
 
-Search with a Riot ID (`Name#TAG`) for League/Valorant, or a platform ID (`steam:7656…`, `epic:…`) for Rocket League. The first lookup downloads recent matches; the **Update** button pulls only new ones.
+Search with a Riot ID (`Name#TAG`) for League/Valorant, a platform ID (`steam:7656…`, `epic:…`) for Rocket League, and a Steam name, Dota friend ID or SteamID64 for Dota 2 and Deadlock. The first lookup downloads recent matches; the **Update** button pulls only new ones.
 
 ## Architecture
 
@@ -65,6 +67,9 @@ backend/   FastAPI
      league.py        Riot account-v1, summoner-v4, league-v4, match-v5 + Data Dragon art
      valorant.py      HenrikDev v1/v2/v3 + valorant-api.com agent/map/rank art
      rocketleague.py  ballchasing.com via the rlstats package (../rl-stat-tracker)
+     dota.py          OpenDota search/players/matches + Valve CDN hero & item art
+     deadlock.py      deadlock-api.com players/rank/match-history/metadata
+     _*_assets.py     hero/item/rank tables snapshotted by scripts/snapshot_assets.py
      demo_data.py     deterministic seasons in the exact upstream JSON shapes
 ```
 
@@ -74,7 +79,8 @@ Design decisions worth calling out:
 - **Raw-first storage.** Upstream match JSON is stored as-is and parsed on read. Parser fixes apply to all history retroactively, and sync never re-downloads a match. A match is stored once and linked to every tracked player in it.
 - **Respectful API usage.**
   - Riot dev keys allow 20 req/s *and* 100 req/2 min. `SlidingWindowLimiter` enforces every window at once, and it's thread-safe because FastAPI runs sync handlers in a pool.
-  - 429s honor `Retry-After`.
+  - 429s honor `Retry-After`, or HenrikDev's `x-ratelimit-reset`.
+  - Adapters store only the fields they parse: a Deadlock match is ~1.7 MB upstream and ~5 KB stored.
   - Upstream failures map to clean `{error, message}` responses and never leak raw upstream errors.
 - **Honest analytics.**
   - Remakes are excluded.
@@ -86,7 +92,7 @@ Design decisions worth calling out:
 ## Development
 
 ```bash
-cd backend && pytest --cov=clutch && ruff check . && ruff format --check .   # 30 tests, ~89% coverage
+cd backend && pytest --cov=clutch && ruff check . && ruff format --check .   # 41 tests, ~89% coverage
 cd frontend && npm test && npm run typecheck && npm run build
 ```
 
@@ -98,4 +104,4 @@ API docs (OpenAPI) are served at `/api/docs`.
 2. Add a demo generator in the upstream API's shape.
 3. Register it in `games/__init__.py`.
 
-The frontend picks it up from `/api/games`.
+The frontend picks it up from `/api/games`; only the sidebar glyph and home-page blurb are per game. Dota 2 and Deadlock were each added this way in about 250 lines with no changes to analytics or UI components.

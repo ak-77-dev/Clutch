@@ -457,3 +457,215 @@ def val_matches() -> list[dict[str, Any]]:
     import copy
 
     return copy.deepcopy(list(_val_matches_cached()))
+
+
+# ── Dota 2 & Deadlock ───────────────────────────────────────────────────────
+# Both are Steam games keyed by 32-bit account id; raw matches use the slimmed
+# shapes the adapters store (``DotaProvider.fetch_match`` / ``slim_match``).
+# Last hits and staying alive win Dota games; souls and accuracy win Deadlock.
+
+DOTA_DEMO_PROFILE: dict[str, Any] = {
+    "game": "dota2",
+    "key": "900000001",
+    "name": "Nightfall",
+    "region": "US East",
+    "demo": True,
+    "icon": "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/antimage.png",
+}
+DEADLOCK_DEMO_PROFILE: dict[str, Any] = {
+    "game": "deadlock",
+    "key": "900000002",
+    "name": "Nightfall",
+    "region": "NA",
+    "demo": True,
+    "icon": "https://assets-bucket.deadlock-api.com/assets-api-res/images/heroes/inferno_sm.webp",
+}
+
+# (hero_id, weight): Anti-Mage, Juggernaut, Phantom Assassin, Shadow Fiend, Faceless Void, Medusa
+DOTA_POOL = [(1, 30), (8, 22), (44, 18), (11, 12), (41, 10), (94, 8)]
+DOTA_ITEMS = [1, 48, 63, 116, 145, 147, 156, 160, 208, 249, 250]
+# (hero_id, weight): Infernus, Vindicta, Kelvin, Lady Geist, Wraith
+DEADLOCK_POOL = [(1, 30), (3, 25), (12, 20), (4, 15), (7, 10)]
+
+
+def _steam_player(rng: random.Random) -> tuple[int, str]:
+    return rng.randint(100_000_000, 899_999_999), f"{rng.choice(_HANDLES)}{rng.randint(1, 999)}"
+
+
+@lru_cache(maxsize=1)
+def _dota_matches_cached(games: int = 140, seed: int = 11) -> tuple[dict[str, Any], ...]:
+    from clutch.games._dota_assets import HEROES
+
+    rng = random.Random(seed)
+    me = (int(DOTA_DEMO_PROFILE["key"]), DOTA_DEMO_PROFILE["name"])
+    friend = (900000011, "Kestrel")
+    ladder = 16.0  # medal ladder value: (medal - 1) * 5 + stars - 1 -> Archon 2
+    others = [h for h in HEROES if h not in dict(DOTA_POOL)]
+    out = []
+    n = 0
+    for start, count in _sessions(rng, games):
+        clock = start
+        for idx in range(count):
+            n += 1
+            turbo = rng.random() < 0.15
+            ranked = not turbo and rng.random() < 0.8
+            form = rng.gauss(0, 1) - 0.2 * max(0, idx - 2)
+            stack = rng.random() < 0.3
+            p_win = 1 / (1 + math.exp(-(0.95 * form + 0.8 * n / games - 0.2 + (0.3 if stack else 0))))
+            won = rng.random() < p_win
+            my_hero = rng.choices([h for h, _ in DOTA_POOL], weights=[w for _, w in DOTA_POOL])[0]
+            if my_hero == 94 and rng.random() < 0.35:  # the comfort pick that isn't working
+                won = False
+            minutes = max(15.0, rng.gauss(22 if turbo else 41 - (3 if won else 0), 7))
+            radiant = rng.random() < 0.5
+            medal_, stars = divmod(int(ladder), 5)
+            tier = (medal_ + 1) * 10 + stars + 1
+            picks = rng.sample(others, 9)
+            players = []
+            for slot in range(10):
+                on_radiant = slot < 5
+                mine = on_radiant == radiant
+                first = mine and slot % 5 == 0
+                duo = mine and stack and slot % 5 == 1
+                acct, name = me if first else friend if duo else _steam_player(rng)
+                f = form if first else rng.gauss(0.2 if duo else 0, 1)
+                core = slot % 5 < 3
+                team_won = mine == won
+                lh_rate = (6.2 + 1.1 * f + (0.6 if team_won else 0)) if core else rng.uniform(0.6, 1.6)
+                players.append(
+                    {
+                        "account_id": acct,
+                        "personaname": name,
+                        "player_slot": slot if on_radiant else 128 + slot - 5,
+                        "isRadiant": on_radiant,
+                        "hero_id": my_hero if first else picks.pop(),
+                        "kills": _poisson(rng, (7 if core else 3) + 2 * f + (2 if team_won else 0)),
+                        "deaths": _poisson(rng, max(1.0, 6.5 - 1.6 * f - (1.5 if team_won else 0))),
+                        "assists": _poisson(rng, (9 if core else 15) + 2 * f + (3 if team_won else 0)),
+                        "last_hits": int(max(0.5, lh_rate) * minutes),
+                        "denies": _poisson(rng, 8 if core else 2),
+                        "gold_per_min": int(max(200, rng.gauss((560 if core else 320) + 70 * f + (60 if team_won else 0), 40))),
+                        "xp_per_min": int(max(250, rng.gauss((650 if core else 450) + 60 * f + (50 if team_won else 0), 45))),
+                        "hero_damage": int(minutes * max(150, rng.gauss((620 if core else 380) + 90 * f, 80))),
+                        "tower_damage": int(max(0, rng.gauss((3500 if core else 700) + 1200 * f + (1500 if team_won else 0), 800))),
+                        "hero_healing": 0,
+                        "net_worth": int(minutes * max(200, rng.gauss(520 if core else 300, 60))),
+                        "level": min(30, int(minutes / 1.6)),
+                        "rank_tier": tier if first else max(11, min(75, tier + rng.choice((-10, -1, 0, 0, 1, 10)))),
+                        "leaver_status": 0,
+                        **{f"item_{i}": rng.choice(DOTA_ITEMS) for i in range(6)},
+                        "item_neutral": 0,
+                    }
+                )
+            out.append(
+                {
+                    "match_id": 8_800_000_000 + n * 7919,
+                    "start_time": int(clock.timestamp()),
+                    "duration": int(minutes * 60),
+                    "radiant_win": radiant == won,
+                    "game_mode": 23 if turbo else 22,
+                    "lobby_type": 7 if ranked else 0,
+                    "radiant_score": sum(p["kills"] for p in players if p["isRadiant"]),
+                    "dire_score": sum(p["kills"] for p in players if not p["isRadiant"]),
+                    "patch": 58,
+                    "players": players,
+                }
+            )
+            if ranked:
+                ladder = min(34.0, max(0.0, ladder + (0.25 if won else -0.22)))
+            clock += timedelta(minutes=minutes + rng.uniform(4, 10))
+    return tuple(out)
+
+
+def dota_matches() -> list[dict[str, Any]]:
+    import copy
+
+    return copy.deepcopy(list(_dota_matches_cached()))
+
+
+@lru_cache(maxsize=1)
+def _deadlock_matches_cached(games: int = 120, seed: int = 13) -> tuple[dict[str, Any], ...]:
+    from clutch.games._deadlock_assets import HEROES
+
+    rng = random.Random(seed)
+    me = (int(DEADLOCK_DEMO_PROFILE["key"]), DEADLOCK_DEMO_PROFILE["name"])
+    friend = (900000012, "Kestrel")
+    ladder = 20.0  # badge ladder value: (tier - 1) * 6 + subrank - 1 -> Acolyte 3
+    pool = [(h, w) for h, w in DEADLOCK_POOL if h in HEROES]
+    others = [h for h in HEROES if h not in dict(pool)]
+    out = []
+    n = 0
+    for start, count in _sessions(rng, games):
+        clock = start
+        for idx in range(count):
+            n += 1
+            ranked = rng.random() < 0.7
+            form = rng.gauss(0, 1) - 0.2 * max(0, idx - 2)
+            stack = rng.random() < 0.3
+            p_win = 1 / (1 + math.exp(-(0.95 * form + 0.7 * n / games - 0.2 + (0.3 if stack else 0))))
+            won = rng.random() < p_win
+            minutes = max(20.0, rng.gauss(33 - (2 if won else 0), 6))
+            my_team = rng.choice((0, 1))
+            my_hero = rng.choices([h for h, _ in pool], weights=[w for _, w in pool])[0]
+            tier, sub = divmod(int(ladder), 6)
+            my_badge = (tier + 1) * 10 + sub + 1
+            picks = rng.sample(others, 11)
+            players = []
+            for slot in range(12):
+                team = slot // 6
+                mine = team == my_team
+                first = mine and slot % 6 == 0
+                duo = mine and stack and slot % 6 == 1
+                acct, name = me if first else friend if duo else _steam_player(rng)
+                f = form if first else rng.gauss(0.2 if duo else 0, 1)
+                team_won = mine == won
+                hits = int(minutes * max(8, rng.gauss(22 + 3 * f, 4)))
+                acc = min(0.8, max(0.2, rng.gauss(0.46 + 0.05 * f + (0.02 if team_won else 0), 0.05)))
+                players.append(
+                    {
+                        "account_id": acct,
+                        "name": name,
+                        "player_slot": slot,
+                        "team": team,
+                        "hero_id": my_hero if first else picks.pop(),
+                        "kills": _poisson(rng, 6 + 2 * f + (2 if team_won else 0)),
+                        "deaths": _poisson(rng, max(1.0, 7 - 1.5 * f - (1.5 if team_won else 0))),
+                        "assists": _poisson(rng, 12 + 3 * f + (3 if team_won else 0)),
+                        "net_worth": int(minutes * max(500, rng.gauss(1150 + 150 * f + (80 if team_won else 0), 90))),
+                        "last_hits": int(minutes * max(2, rng.gauss(6 + f, 1.2))),
+                        "denies": _poisson(rng, 8),
+                        "level": min(36, int(minutes / 0.9)),
+                        "badge": my_badge if first else max(11, my_badge + rng.choice((-10, -1, 0, 0, 1))),
+                        "stats": {
+                            "player_damage": int(minutes * max(300, rng.gauss(900 + 150 * f, 110))),
+                            "player_damage_taken": int(minutes * max(300, rng.gauss(950 - 90 * f, 110))),
+                            "player_healing": int(minutes * max(20, rng.gauss(260, 90))),
+                            "boss_damage": int(max(0, rng.gauss(9000 + 3000 * f + (4000 if team_won else 0), 2500))),
+                            "shots_hit": int(hits / 0.9 * acc),
+                            "shots_missed": int(hits / 0.9 * (1 - acc)),
+                            "hero_bullets_hit": hits,
+                            "hero_bullets_hit_crit": int(hits * min(0.5, max(0.03, rng.gauss(0.14 + 0.03 * f, 0.03)))),
+                        },
+                    }
+                )
+            out.append(
+                {
+                    "match_id": 106_000_000 + n * 4099,
+                    "start_time": int(clock.timestamp()),
+                    "duration_s": int(minutes * 60),
+                    "winning_team": my_team if won else 1 - my_team,
+                    "match_mode": 4 if ranked else 1,
+                    "game_mode": 1,
+                    "players": players,
+                }
+            )
+            if ranked:
+                ladder = min(59.0, max(0.0, ladder + (0.3 if won else -0.27)))
+            clock += timedelta(minutes=minutes + rng.uniform(3, 8))
+    return tuple(out)
+
+
+def deadlock_matches() -> list[dict[str, Any]]:
+    import copy
+
+    return copy.deepcopy(list(_deadlock_matches_cached()))

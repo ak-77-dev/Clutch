@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useGames } from '../hooks'
 
 // Neutral monograms (not official logos) tinted with each game's accent.
-const GLYPH: Record<string, string> = { lol: 'LoL', valorant: 'VAL', rocketleague: 'RL' }
+const GLYPH: Record<string, string> = { lol: 'LoL', valorant: 'VAL', rocketleague: 'RL', dota2: 'D2', deadlock: 'DL' }
 
 export function Logo({ size = 40 }: { size?: number }) {
   return (

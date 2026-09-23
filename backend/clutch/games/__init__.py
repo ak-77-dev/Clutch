@@ -6,8 +6,10 @@ from clutch.games.base import GameProvider
 
 
 def default_providers() -> list[GameProvider]:
+    from clutch.games.deadlock import DeadlockProvider
+    from clutch.games.dota import DotaProvider
     from clutch.games.league import LeagueProvider
     from clutch.games.rocketleague import RocketLeagueProvider
     from clutch.games.valorant import ValorantProvider
 
-    return [LeagueProvider(), ValorantProvider(), RocketLeagueProvider()]
+    return [LeagueProvider(), ValorantProvider(), RocketLeagueProvider(), DotaProvider(), DeadlockProvider()]

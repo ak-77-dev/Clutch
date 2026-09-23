@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { deltaInfo, fmtDuration, fmtValue, timeAgo } from './format'
+import { deltaInfo, fmtDuration, fmtValue, plural, timeAgo } from './format'
 
 describe('format', () => {
+  it('pluralizes character labels', () => {
+    expect(['Champion', 'Agent', 'Car', 'Hero'].map(plural)).toEqual(['Champions', 'Agents', 'Cars', 'Heroes'])
+  })
+
   it('formats metric values', () => {
     expect(fmtValue(7.234, 'float1')).toBe('7.2')
     expect(fmtValue(3.456, 'float2')).toBe('3.46')

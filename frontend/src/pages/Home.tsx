@@ -9,6 +9,8 @@ const BLURB: Record<string, string> = {
   lol: 'Match history, champion pool, CS/vision trends and what actually wins you games — from the official Riot API.',
   valorant: 'Agents, maps, ACS/ADR/HS% trends and rank history — via the HenrikDev API.',
   rocketleague: 'Replays from ballchasing.com: boost, positioning, rank climb and duo chemistry.',
+  dota2: 'Heroes, GPM/XPM, last hits and medal history from OpenDota. No API key needed.',
+  deadlock: 'Heroes, souls, accuracy and rank badges from deadlock-api.com. No API key needed.',
 }
 
 export function Home() {

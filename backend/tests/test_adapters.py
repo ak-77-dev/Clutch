@@ -102,6 +102,23 @@ def test_valorant_draw_and_unrated_rank():
     assert tier_name(27) == "Radiant" and tier_name(0) is None
 
 
+def test_valorant_skips_kill_target_modes_and_unavailable_matches():
+    v = ValorantProvider(api_key="")
+    prof = Profile(**copy.deepcopy(VAL_DEMO_PROFILE))
+    raw = val_matches()[0]
+    for mode in ("Deathmatch", "Team Deathmatch"):
+        dm = copy.deepcopy(raw)
+        dm["metadata"]["mode"] = mode
+        assert v.parse(dm, prof) is None
+
+    class Page:
+        def get(self, url, params=None):
+            return {"data": [{"is_available": False, "metadata": None}, raw]}
+
+    v.client = Page()
+    assert v.list_match_ids(prof, 10) == [raw["metadata"]["matchid"]]
+
+
 def test_rocket_league_adapter_uses_rlstats():
     rl = RocketLeagueProvider(api_key="")
     prof = rl.demo_profile()

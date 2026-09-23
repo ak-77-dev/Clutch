@@ -9,7 +9,7 @@ from clutch.store import Store
 
 @pytest.fixture(autouse=True)
 def _no_keys(monkeypatch):
-    for var in ("RIOT_API_KEY", "HENRIK_API_KEY", "BALLCHASING_API_KEY"):
+    for var in ("RIOT_API_KEY", "HENRIK_API_KEY", "BALLCHASING_API_KEY", "OPENDOTA_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 
 

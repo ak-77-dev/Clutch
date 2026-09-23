@@ -73,7 +73,7 @@ class Match:
     result: Literal["win", "loss", "draw", "remake"]
     character: str
     character_icon: str | None
-    metrics: dict[str, float]
+    metrics: dict[str, float | None]  # None = the API didn't report it for this match
     role: str | None = None
     map: str | None = None
     rank_label: str | None = None

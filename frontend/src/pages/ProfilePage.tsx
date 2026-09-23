@@ -5,7 +5,7 @@ import { FactorsChart, FormChart, RankChart, TiltChart, TrendChart } from '../co
 import { MatchCard } from '../components/MatchCard'
 import { Portrait } from '../components/Portrait'
 import { CharacterTable, Insights, RankCard, SimpleGroupTable, StatTiles } from '../components/ProfileBits'
-import { fmtWinRate, timeAgo } from '../format'
+import { fmtWinRate, plural, timeAgo } from '../format'
 import { useAsync } from '../hooks'
 import type { Game, MatchPage, OverviewResponse } from '../types'
 
@@ -76,7 +76,14 @@ export function ProfilePage() {
 
       {p.demo && (
         <div className="banner">
-          <b>Demo profile.</b> Synthetic season in the exact {g.name} API format — add an API key in <code>backend/.env</code> to look up real players.
+          <b>Demo profile.</b> Synthetic season in the exact {g.name} API format —{' '}
+          {g.configured ? (
+            'search any player above to see real data.'
+          ) : (
+            <>
+              add an API key in <code>backend/.env</code> to look up real players.
+            </>
+          )}
         </div>
       )}
 
@@ -85,7 +92,7 @@ export function ProfilePage() {
           [
             ['overview', 'Overview'],
             ['matches', 'Match history'],
-            ['pool', `${g.character_label}s`],
+            ['pool', plural(g.character_label)],
             ['insights', 'Insights'],
           ] as [Tab, string][]
         ).map(([t, label]) => (
@@ -139,7 +146,7 @@ function OverviewTab({ r, onPick }: { r: OverviewResponse; onPick: (c: string) =
           <RankCard ranks={r.profile.ranks} />
         </section>
         <section className="card">
-          <h2>Top {g.character_label.toLowerCase()}s</h2>
+          <h2>Top {plural(g.character_label).toLowerCase()}</h2>
           <CharacterTable game={{ ...g, card_metrics: g.card_metrics.slice(0, 1) }} rows={ov.characters} limit={6} onPick={onPick} />
         </section>
         {ov.teammates.length > 0 && (

@@ -93,7 +93,9 @@ export function CharacterTable({ game, rows, limit, onPick }: { game: Game; rows
               <td>
                 <div className="cell-char">
                   <Portrait src={r.icon} name={r.name} size="xs" />
-                  {r.name}
+                  <span className="char-name" title={r.name}>
+                    {r.name}
+                  </span>
                 </div>
               </td>
               <td className="num">{r.games}</td>

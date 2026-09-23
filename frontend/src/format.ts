@@ -20,6 +20,11 @@ export function fmtMetric(metric: Metric | undefined, v: number | null | undefin
   return fmtValue(v, metric?.fmt ?? 'float1')
 }
 
+/** "Champion" -> "Champions", "Hero" -> "Heroes". */
+export function plural(noun: string): string {
+  return /[^aeiou]o$/i.test(noun) ? `${noun}es` : `${noun}s`
+}
+
 export function fmtDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)

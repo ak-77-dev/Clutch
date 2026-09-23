@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deltaInfo, fmtBytes, fmtClock, fmtDuration, fmtHours, fmtValue, hoursNumber, monogram, plural, timeAgo } from './format'
+import { accelerator, deltaInfo, fmtBytes, fmtClock, fmtDuration, fmtHours, fmtValue, hoursNumber, monogram, plural, timeAgo } from './format'
 
 describe('format', () => {
   it('pluralizes character labels', () => {
@@ -40,5 +40,14 @@ describe('format', () => {
     expect([fmtBytes(512), fmtBytes(1536), fmtBytes(5 * 1024 ** 3)]).toEqual(['512 B', '1.5 KB', '5.0 GB'])
     expect([fmtClock(75.4), fmtClock(3725)]).toEqual(['1:15', '1:02:05'])
     expect([monogram('VALORANT'), monogram('Call of Duty Modern Warfare')]).toEqual(['VAL', 'COD'])
+  })
+
+  it('turns key presses into Electron accelerators', () => {
+    const k = (code: string, key: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) =>
+      accelerator({ code, key, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods })
+    expect(k('BracketLeft', '[')).toBe('[')
+    expect(k('F8', 'F8')).toBe('F8')
+    expect(k('KeyK', 'k', { altKey: true })).toBe('Alt+K')
+    expect(k('KeyK', 'k')).toBeNull() // bare letters would fire while typing
   })
 })

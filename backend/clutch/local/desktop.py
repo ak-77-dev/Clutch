@@ -10,6 +10,7 @@ UI and the Electron shell subscribe to (Server-Sent Events).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import queue
 import threading
@@ -95,10 +96,18 @@ class Desktop:
             fps=s.fps,
             quality=s.quality,
             encoder=s.encoder,
+            codec=s.codec,
+            preset=s.preset,
+            rate_control=s.rate_control,
+            bitrate_mbps=s.bitrate_mbps,
+            resolution=s.resolution,
             monitor=s.monitor,
             buffer_seconds=s.buffer_seconds,
             system_audio=s.record_system_audio,
             mic=s.record_mic,
+            audio_device=s.audio_device,
+            mic_device=s.mic_device,
+            audio_kbps=s.audio_kbps,
         )
 
     def current_game(self) -> Game | None:
@@ -163,15 +172,43 @@ class Desktop:
         self.events.publish("buffer", **status)
         return status
 
+    def capabilities(self) -> dict[str, Any]:
+        """What this PC can record with: encoders per codec, and audio devices."""
+        from clutch.local.capture import capabilities, list_audio_devices
+
+        return {"encoders": capabilities(), "audio": list_audio_devices()}
+
     def save_clip(self, seconds: float | None = None) -> dict[str, Any]:
         if not self.buffer.active:
             self.set_buffer(True)
             raise RuntimeError("The replay buffer was off, so it's on now. Press the hotkey again in a few seconds.")
         game = self.current_game()
+        self.events.publish("clip_saving", game_name=game.name if game else None)
         dest = ClipStore.new_path(self.clips_root, game.name if game else None, "clip")
-        self.buffer.save(dest, seconds=seconds or self.cfg.buffer_seconds)
-        clip = self.clips.add(dest, kind="clip", game_id=game.id if game else None, game_name=game.name if game else None)
+        started = time.perf_counter()
+        info = self.buffer.save(dest, seconds=seconds or self.cfg.buffer_seconds)
+        saved = time.perf_counter()
+        clip = self._register(dest, "clip", game, info)
+        print(
+            f"[clip] {info.get('duration', 0):.1f}s saved in {(saved - started) * 1000:.0f} ms"
+            f" (prepare {info.get('prepare_ms')} ms, mux {info.get('mux_ms')} ms)"
+            f" + indexed in {(time.perf_counter() - saved) * 1000:.0f} ms (audio: {info.get('audio')})",
+            flush=True,
+        )
+        return clip
+
+    def _register(self, dest: Path, kind: str, game: Game | None, info: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Index a new file and announce it right away; the thumbnail follows a moment later."""
+        clip = self.clips.add(
+            dest, kind=kind, game_id=game.id if game else None, game_name=game.name if game else None, info=info, thumbnail=False
+        )
         self.events.publish("clip_saved", clip=clip)
+
+        def thumb() -> None:
+            with contextlib.suppress(Exception):  # a missing thumbnail must never lose the clip
+                self.events.publish("clip_updated", clip=self.clips.make_thumbnail(clip["id"]))
+
+        threading.Thread(target=thumb, name="clutch-thumb", daemon=True).start()
         return clip
 
     def toggle_recording(self) -> dict[str, Any]:
@@ -184,19 +221,15 @@ class Desktop:
             return {"recording": True, "status": status}
         game = self.current_game()
         dest = ClipStore.new_path(self.clips_root, game.name if game else None, "recording")
-        self.buffer.stop_recording(dest)
-        clip = self.clips.add(dest, kind="recording", game_id=game.id if game else None, game_name=game.name if game else None)
+        info = self.buffer.stop_recording(dest)
         self.events.publish("recording", **self.buffer.status())
-        self.events.publish("clip_saved", clip=clip)
-        return {"recording": False, "clip": clip}
+        return {"recording": False, "clip": self._register(dest, "recording", game, info)}
 
     def take_screenshot(self) -> dict[str, Any]:
         game = self.current_game()
         dest = ClipStore.new_path(self.clips_root, game.name if game else None, "screenshot", ".png")
         screenshot(dest, self.cfg.monitor)
-        shot = self.clips.add(dest, kind="screenshot", game_id=game.id if game else None, game_name=game.name if game else None)
-        self.events.publish("clip_saved", clip=shot)
-        return shot
+        return self._register(dest, "screenshot", game)
 
     # ── read models ─────────────────────────────────────────────────────────
     def library_view(self, include_hidden: bool = False) -> list[dict[str, Any]]:

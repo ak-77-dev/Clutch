@@ -48,7 +48,7 @@ function ClipsInner() {
   const { status, toast } = useDesktop()
 
   useDesktopEvents((e) => {
-    if (e.type === 'clip_saved') clips.reload()
+    if (e.type === 'clip_saved' || e.type === 'clip_updated') clips.reload()
   })
 
   // Pick up clips saved while the app was closed (and forget deleted files) once per visit.

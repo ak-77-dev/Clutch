@@ -94,9 +94,14 @@ class ClipStore:
         game_name: str | None = None,
         title: str | None = None,
         parent_id: int | None = None,
+        info: dict[str, Any] | None = None,
+        thumbnail: bool = True,
     ) -> dict[str, Any]:
-        info = media_info(path) if path.suffix.lower() in VIDEO_EXT else _image_info(path)
-        thumb = self._thumbnail(path, info)
+        """Index a file. ``info`` skips re-probing what the recorder already knows; ``thumbnail=False`` defers the thumbnail."""
+        if info is None or "width" not in info:
+            probed = media_info(path) if path.suffix.lower() in VIDEO_EXT else _image_info(path)
+            info = {**probed, **(info or {})}
+        thumb = self._thumbnail(path, info) if thumbnail else None
         created = path.stat().st_mtime
         default_title = f"{game_name or 'Desktop'} · {datetime.fromtimestamp(created).strftime('%b %d, %I:%M %p').replace(' 0', ' ')}"
         with self._lock:
@@ -130,6 +135,15 @@ class ClipStore:
             args = ["-ss", f"{at:.2f}", "-i", str(path), "-vf", "scale=640:-2", "-frames:v", "1", "-q:v", "4", str(out)]
         result = run_ffmpeg(args, timeout=30)
         return out if result.returncode == 0 and out.exists() else None
+
+    def make_thumbnail(self, clip_id: int) -> dict[str, Any]:
+        clip = self.get(clip_id)
+        path = Path(clip["path"])
+        thumb = self._thumbnail(path, {"duration": clip["duration"]})
+        with self._lock:
+            self.db.execute("UPDATE clips SET thumb = ? WHERE id = ?", (str(thumb) if thumb else None, clip_id))
+            self.db.commit()
+        return self.get(clip_id)
 
     def get(self, clip_id: int) -> dict[str, Any]:
         with self._lock:

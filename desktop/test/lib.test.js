@@ -2,7 +2,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('node:path')
-const { findPython, freePort, parseSSE, overlayFor, sessionNotification, hours } = require('../lib')
+const { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, hours } = require('../lib')
 
 test('findPython prefers the env override, then the backend venv', () => {
   assert.equal(findPython('/b', { CLUTCH_PYTHON: '/custom/python' }), '/custom/python')
@@ -27,8 +27,11 @@ test('overlay messages', () => {
     title: 'Clip saved',
     sub: 'VALORANT · 60s',
     tone: 'ok',
-    sound: 'clip',
+    sound: null, // the press already beeped
   })
+  assert.equal(pressFeedback('clip', { buffer_seconds: 90 }).sub, 'Saving the last 90s…')
+  assert.equal(pressFeedback('clip').sound, 'clip')
+  assert.equal(pressFeedback('record', {}, false), null) // starting a recording announces itself via the event
   assert.equal(overlayFor({ type: 'clip_saved', clip: { kind: 'screenshot' } }).sub, 'Desktop')
   assert.equal(overlayFor({ type: 'recording', recording: true }).tone, 'rec')
   assert.equal(overlayFor({ type: 'recording', recording: false }), null)

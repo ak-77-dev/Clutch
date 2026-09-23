@@ -96,6 +96,8 @@ export interface LibraryGame {
 export interface BufferStatus {
   active: boolean
   encoder: string | null
+  codec?: string | null
+  audio_restarts?: number
   buffer_seconds: number
   buffered_seconds: number
   recording: boolean
@@ -174,8 +176,16 @@ export interface Settings {
   clips_dir: string
   buffer_seconds: number
   fps: number
-  quality: 'low' | 'medium' | 'high' | 'ultra'
+  quality: 'low' | 'medium' | 'high' | 'ultra' | 'max'
   encoder: 'auto' | 'nvenc' | 'amf' | 'qsv' | 'x264'
+  codec: 'h264' | 'hevc' | 'av1'
+  preset: 'speed' | 'balanced' | 'quality'
+  rate_control: 'quality' | 'bitrate'
+  bitrate_mbps: number
+  resolution: 'native' | '1440' | '1080' | '720'
+  audio_kbps: number
+  audio_device: string
+  mic_device: string
   monitor: number
   record_system_audio: boolean
   record_mic: boolean
@@ -190,8 +200,15 @@ export interface Settings {
   linked_profiles: Record<string, string>
 }
 
+export interface Capabilities {
+  encoders: Record<'nvenc' | 'amf' | 'qsv' | 'x264', Record<string, boolean>>
+  audio: { outputs: string[]; inputs: string[] }
+}
+
 export type DesktopEvent =
   | { type: 'clip_saved'; at: number; clip: Clip }
+  | { type: 'clip_updated'; at: number; clip: Clip }
+  | { type: 'clip_saving'; at: number; game_name: string | null }
   | ({ type: 'buffer'; at: number; reason?: string } & BufferStatus)
   | ({ type: 'recording'; at: number } & BufferStatus)
   | { type: 'game_started'; at: number; game_id: string; game_name: string; stats_game: string | null }
@@ -207,6 +224,7 @@ const enc = encodeURIComponent
 export const desktop = {
   status: () => call<DesktopStatus>('/status'),
   settings: () => call<Settings>('/settings'),
+  capabilities: () => call<Capabilities>('/capabilities'),
   saveSettings: (patch: Partial<Settings>) => call<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 
   library: (hidden = false) => call<LibraryGame[]>(`/library${hidden ? '?hidden=true' : ''}`),
@@ -249,7 +267,7 @@ let source: EventSource | null = null
 function ensureSource() {
   if (source || !isDesktop) return
   source = new EventSource(mediaUrl('/events'))
-  const types: DesktopEvent['type'][] = ['clip_saved', 'buffer', 'recording', 'game_started', 'session_end', 'launching', 'stats_synced', 'error']
+  const types: DesktopEvent['type'][] = ['clip_saved', 'clip_updated', 'clip_saving', 'buffer', 'recording', 'game_started', 'session_end', 'launching', 'stats_synced', 'error']
   for (const t of types) {
     source.addEventListener(t, (msg) => {
       const event = JSON.parse((msg as MessageEvent).data) as DesktopEvent

@@ -58,7 +58,8 @@ function overlayFor(event) {
     case 'clip_saved': {
       const c = event.clip || {}
       const what = c.kind === 'screenshot' ? 'Screenshot saved' : c.kind === 'recording' ? 'Recording saved' : 'Clip saved'
-      return { title: what, sub: [c.game_name || 'Desktop', c.duration ? `${Math.round(c.duration)}s` : null].filter(Boolean).join(' · '), tone: 'ok', sound: 'clip' }
+      // The sound already played when the key was pressed (see pressFeedback); this just confirms.
+      return { title: what, sub: [c.game_name || 'Desktop', c.duration ? `${Math.round(c.duration)}s` : null].filter(Boolean).join(' · '), tone: 'ok', sound: null }
     }
     case 'recording':
       return event.recording ? { title: 'Recording', sub: 'Press again to stop', tone: 'rec', sound: 'start' } : null
@@ -71,6 +72,14 @@ function overlayFor(event) {
   }
 }
 
+/** Instant feedback the moment a hotkey is pressed, before the backend has done anything. */
+function pressFeedback(kind, settings = {}, recording = false) {
+  if (kind === 'clip') return { title: 'Clipping', sub: `Saving the last ${settings.buffer_seconds || 60}s…`, tone: 'ok', sound: 'clip' }
+  if (kind === 'record') return recording ? { title: 'Saving recording', sub: 'Stitching it together…', tone: 'ok', sound: 'clip' } : null
+  if (kind === 'screenshot') return { title: 'Screenshot', sub: 'Saved to your clips', tone: 'ok', sound: 'clip' }
+  return null
+}
+
 /** Desktop notification for a finished session (the overlay is gone by then). */
 function sessionNotification(event) {
   if (event.type !== 'session_end' || event.notify === false) return null
@@ -78,4 +87,4 @@ function sessionNotification(event) {
   return { title: `${event.game_name} · ${hours(event.seconds)}`, body: `Session recap${clips}. Open Clutch to review.` }
 }
 
-module.exports = { findPython, freePort, parseSSE, overlayFor, sessionNotification, hours }
+module.exports = { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, hours }

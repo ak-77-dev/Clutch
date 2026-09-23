@@ -1,0 +1,10 @@
+# Local data & generated output
+*.db
+dashboard.html
+demo_dashboard.html
+matches.csv
+data.json
+.coverage
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

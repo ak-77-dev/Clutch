@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rlstats"
+version = "2.0.0"
+description = "Rocket League performance analytics: incremental ballchasing.com sync, insights and an interactive dashboard."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["requests>=2.31", "python-dotenv>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6"]
+
+[project.scripts]
+rlstats = "rlstats.cli:main"
+
+[tool.setuptools]
+packages = ["rlstats"]
+
+[tool.setuptools.package-data]
+rlstats = ["templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501"]

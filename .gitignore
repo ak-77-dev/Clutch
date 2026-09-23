@@ -1,7 +1,7 @@
 # Local data & generated output
 *.db
-dashboard.html
-demo_dashboard.html
+/dashboard.html
+/demo_dashboard.html
 matches.csv
 data.json
 .coverage

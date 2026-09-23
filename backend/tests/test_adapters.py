@@ -114,14 +114,18 @@ def test_valorant_draw_and_unrated_rank():
     assert tier_name(27) == "Radiant" and tier_name(0) is None
 
 
-def test_valorant_skips_kill_target_modes_and_unavailable_matches():
+def test_valorant_kill_target_modes_and_unavailable_matches():
     v = ValorantProvider(api_key="")
     prof = Profile(**copy.deepcopy(VAL_DEMO_PROFILE))
     raw = val_matches()[0]
-    for mode in ("Deathmatch", "Team Deathmatch"):
-        dm = copy.deepcopy(raw)
-        dm["metadata"]["mode"] = mode
-        assert v.parse(dm, prof) is None
+    dm = copy.deepcopy(raw)
+    dm["metadata"]["mode"] = "Deathmatch"  # free-for-all: no teams, no result
+    assert v.parse(dm, prof) is None
+    tdm = copy.deepcopy(raw)
+    tdm["metadata"]["mode"] = "Team Deathmatch"  # kept, minus the per-round stats
+    m = v.parse(tdm, prof)
+    assert m.metrics["acs"] is None and m.metrics["adr"] is None and m.metrics["deaths_per_round"] is None
+    assert m.metrics["kd"] > 0 and m.result in ("win", "loss")
 
     class Page:
         def get(self, url, params=None):

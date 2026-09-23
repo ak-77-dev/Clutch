@@ -44,7 +44,7 @@ def test_errors(api):
 
 def test_games_and_recent(api):
     games = api.get("/api/games").json()
-    assert [g["id"] for g in games] == ["lol", "valorant", "rocketleague", "dota2", "deadlock"]
+    assert [g["id"] for g in games] == ["lol", "valorant", "rocketleague", "dota2", "deadlock", "cod"]
     # Keyed games are off without keys; OpenDota and deadlock-api.com need none.
     assert {g["id"]: g["configured"] for g in games} == {
         "lol": False,
@@ -52,6 +52,7 @@ def test_games_and_recent(api):
         "rocketleague": False,
         "dota2": True,
         "deadlock": True,
+        "cod": False,
     }
     api.get("/api/valorant/search", params={"q": "demo"})
     assert api.get("/api/recent").json()[0]["game"] == "valorant"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,16 +20,32 @@ from clutch.store import Store
 DEFAULT_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
-def create_app(service: Clutch | None = None, *, static_dir: Path | None = DEFAULT_DIST) -> FastAPI:
+def create_app(service: Clutch | None = None, *, static_dir: Path | None = DEFAULT_DIST, desktop: Any = None) -> FastAPI:
     app = FastAPI(title="Clutch", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
     svc = service or Clutch(Store(os.environ.get("CLUTCH_DB", "clutch.db")), default_providers())
     app.state.clutch = svc
+
+    # Desktop mode (the Electron app): local library, launcher, playtime, clipping.
+    if desktop is None and os.environ.get("CLUTCH_DESKTOP") == "1":
+        from clutch.local.desktop import Desktop
+
+        desktop = Desktop(svc)
+    app.state.desktop = desktop
+    if desktop is not None:
+        from clutch.local.api import router as desktop_router
+
+        token = os.environ.get("CLUTCH_TOKEN")
+        if not token:
+            raise RuntimeError("Desktop mode needs CLUTCH_TOKEN (the Electron shell sets it)")
+        app.state.desktop_token = token
+        app.include_router(desktop_router(desktop))
+        app.router.on_shutdown.append(desktop.shutdown)
 
     # Vite dev server runs on another port during development.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["*"],
     )
 
@@ -55,7 +72,7 @@ def create_app(service: Clutch | None = None, *, static_dir: Path | None = DEFAU
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True, "version": __version__}
+        return {"ok": True, "version": __version__, "desktop": desktop is not None}
 
     @app.get("/api/games")
     def games() -> list[dict]:

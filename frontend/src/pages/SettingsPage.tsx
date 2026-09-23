@@ -3,23 +3,8 @@ import { Link } from 'react-router-dom'
 import { useDesktop } from '../components/Shell'
 import { bridge, desktop, type Settings } from '../desktop'
 import { useGames } from '../hooks'
+import { accelerator } from '../format'
 import { DesktopOnly } from './DesktopOnly'
-
-/** KeyboardEvent -> Electron accelerator ("Alt+F8", "CommandOrControl+Shift+K"). */
-export function accelerator(e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>): string | null {
-  if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return null
-  let key: string
-  if (/^F\d{1,2}$/.test(e.key)) key = e.key
-  else if (e.code.startsWith('Key')) key = e.code.slice(3)
-  else if (e.code.startsWith('Digit')) key = e.code.slice(5)
-  else if (e.code.startsWith('Numpad')) key = `num${e.code.slice(6).toLowerCase()}`
-  else key = ({ Space: 'Space', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown', Insert: 'Insert', Pause: 'Pause', ScrollLock: 'Scrolllock' } as Record<string, string>)[e.code] ?? ''
-  if (!key) return null
-  const mods = [e.ctrlKey && 'CommandOrControl', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean)
-  // A bare letter would fire while typing in chat: require a modifier unless it's a function/special key.
-  if (!mods.length && /^[A-Z0-9]$/.test(key)) return null
-  return [...mods, key].join('+')
-}
 
 function Hotkey({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [listening, setListening] = useState(false)

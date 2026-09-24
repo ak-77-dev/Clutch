@@ -31,6 +31,7 @@ from clutch.local.friends import FriendStore
 from clutch.local.friends import feed as friends_feed
 from clutch.local.goals import GoalStore, evaluate
 from clutch.local.library import Game, Library
+from clutch.local.media import MediaService
 from clutch.local.playtime import PlaytimeTracker, stats_game_for
 from clutch.local.reports import ReportStore, iso_ts, match_window, summarize_matches
 from clutch.local.storage import plan_cleanup
@@ -88,6 +89,7 @@ class Desktop:
         )
         self.gsi = GsiServer(gsi_token(self.home), self._highlight)
         self.league = LeaguePoller(self._highlight, lambda: "riot:league_of_legends" in self.playtime.running)
+        self.media = MediaService(self.events)
         self._auto_buffer = False  # started by a game launch (so stop it when games close)
         self._stop = threading.Event()
         self._lock = threading.RLock()
@@ -103,6 +105,7 @@ class Desktop:
             self.gsi.start()
             self.league.start()
             threading.Thread(target=self._minutely, name="clutch-minutely", daemon=True).start()
+            threading.Thread(target=self.media.start, name="clutch-media-start", daemon=True).start()
 
     # ── helpers ─────────────────────────────────────────────────────────────
     @property
@@ -148,6 +151,9 @@ class Desktop:
     # ── game lifecycle ──────────────────────────────────────────────────────
     def _game_started(self, game: Game) -> None:
         self.events.publish("game_started", game_id=game.id, game_name=game.name, stats_game=stats_game_for(game))
+        if self.cfg.music_duck:
+            with contextlib.suppress(Exception):
+                self.media.duck(self.cfg.music_duck_level / 100)
         if self.cfg.auto_buffer and not self.buffer.active:
             try:
                 self.buffer.start(self.capture_config())
@@ -161,6 +167,9 @@ class Desktop:
         clips = [c for c in self.clips.list(game_id=game.id) if c["created_at"] >= session["started_at"] - 5]
         self.events.publish("session_end", **session, clips=len(clips), notify=self.cfg.notify_sessions)
         report = self.reports.create(session, [c["id"] for c in clips])
+        if not self.playtime.running:
+            with contextlib.suppress(Exception):
+                self.media.restore()  # music back up once the last game closes
         if self._auto_buffer and not self.playtime.running and not self.buffer.recording_since:
             self.buffer.stop()
             self._auto_buffer = False
@@ -468,6 +477,9 @@ class Desktop:
         today = self.playtime.daily(1)[-1] if self.playtime.daily(1) else {"seconds": 0}
         current = playing[0] if playing else None
         out: dict[str, Any] = {"playing": current, "today_seconds": today["seconds"], "buffer": self.buffer.status()}
+        track = self.media.now_playing()
+        if track:
+            out["music"] = {k: track[k] for k in ("title", "artist", "app_name", "status")}
         if current:
             out["session_clips"] = sum(1 for c in self.clips.list(game_id=current["game_id"]) if c["created_at"] >= current["started_at"])
             game = self._stats_game_of(current["game_id"])
@@ -557,6 +569,7 @@ class Desktop:
 
     def shutdown(self) -> None:
         self._stop.set()
+        self.media.stop()
         self.autoclip.flush()
         self.league.stop()
         self.gsi.stop()

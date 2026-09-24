@@ -6,7 +6,7 @@ const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { findPython, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification } = require('./lib')
+const { findPython, musicFeedback, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification } = require('./lib')
 const { DiscordPresence, activityFor } = require('./discord')
 
 const ROOT = path.resolve(__dirname, '..')
@@ -298,7 +298,7 @@ function createPanel() {
   const { workArea } = screen.getPrimaryDisplay()
   panel = new BrowserWindow({
     width: 310,
-    height: 190,
+    height: 230, // room for the now-playing row
     x: workArea.x + 8,
     y: workArea.y + 8,
     frame: false,
@@ -406,6 +406,17 @@ async function action(kind) {
   }
 }
 
+/** Media hotkeys: control whatever's playing, then say what's on now (over the game). */
+async function mediaAction(which) {
+  try {
+    const state = await call(`/api/desktop/media/${which}`, { method: 'POST', body: '{}' })
+    if (!(win && win.isFocused())) flash(musicFeedback(which, state))
+    setTimeout(refreshPanel, 300)
+  } catch (err) {
+    flash({ title: 'Music', sub: err.message, tone: 'error', sound: null })
+  }
+}
+
 async function togglePanel() {
   if (!settings.overlay_enabled) {
     try {
@@ -429,11 +440,20 @@ async function registerHotkeys() {
   }
   globalShortcut.unregisterAll()
   const failed = []
-  for (const [key, kind] of [['hotkey_clip', 'clip'], ['hotkey_record', 'record'], ['hotkey_screenshot', 'screenshot'], ['hotkey_overlay', 'panel']]) {
+  const bindings = [
+    ['hotkey_clip', 'clip'],
+    ['hotkey_record', 'record'],
+    ['hotkey_screenshot', 'screenshot'],
+    ['hotkey_overlay', 'panel'],
+    ['hotkey_media_play', 'media:play_pause'],
+    ['hotkey_media_next', 'media:next'],
+    ['hotkey_media_prev', 'media:previous'],
+  ]
+  for (const [key, kind] of bindings) {
     const accel = settings[key]
     if (!accel) continue
     try {
-      const handler = kind === 'panel' ? () => togglePanel() : () => action(kind)
+      const handler = kind === 'panel' ? () => togglePanel() : kind.startsWith('media:') ? () => mediaAction(kind.slice(6)) : () => action(kind)
       if (!globalShortcut.register(accel, handler)) failed.push(accel)
     } catch {
       failed.push(accel)

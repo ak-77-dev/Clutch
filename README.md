@@ -8,7 +8,8 @@ Clutch is a desktop app in the spirit of Blitz.gg and Medal, in one place:
 - **Media hub.** Every clip in one place: hover-scrub previews, frame-accurate trimming, GIF export, a "fits in Discord's 10 MB" export, captions, 9:16 vertical exports, montages, a copy without your mic (separate audio tracks), and share links. Clips link to the match they were recorded in.
 - **Playtime & sessions.** Every session is tracked automatically: totals, streaks, a 26-week heatmap, and a report card per session (W/L, form vs. usual, MVP game) when the game's account is linked.
 - **Goals & friends.** Daily caps, practice hours, clip counts, win-rate and rank goals. A friends feed built from your friends' public stats profiles.
-- **In game.** A click-through session panel (time, today's record, daily cap) and Discord Rich Presence.
+- **In game.** A click-through session panel (time, today's record, daily cap, what's playing) and Discord Rich Presence.
+- **Music.** See and control Spotify, Apple Music, YouTube Music (or anything else in Windows' media controls) from Clutch: album art, seek, shuffle / repeat, per-app volume, launch buttons, media hotkeys that work over games, and optional ducking that turns music down while a game runs. No sign-in or API key.
 - **Stats.** Match history, rank climbs and plain-English insights on *what separates your wins from your losses* for 14 games: League of Legends, Valorant, Counter-Strike 2 (FACEIT), Rocket League, Dota 2, Deadlock, Teamfight Tactics, PUBG, Brawl Stars, Clash Royale, osu!, Chess.com, Lichess and (experimentally) Call of Duty. Link your accounts and your stats refresh on their own after every session.
 
 ![Clutch home](docs/desktop-home.png)
@@ -66,6 +67,7 @@ Releases come from `.github/workflows/clutch-release.yml`: push a tag `clutch-v<
 | **F9** | Start / stop a full recording |
 | **F10** | Screenshot |
 | **Alt+O** | Show / hide the in-game session panel |
+| **Ctrl+Alt+P** / **Ctrl+Alt+→** / **Ctrl+Alt+←** | Music: play-pause / next / previous (a toast over the game says what's on) |
 
 All of them can be rebound in **Settings** by pressing the new key combo. They're global, so they work while a game has focus.
 
@@ -119,6 +121,7 @@ backend/   FastAPI
      share.py        share-link uploads (catbox / litterbox)
      storage.py      auto-cleanup by age / size (favorites kept)
      keys.py         API keys from the Settings page
+     media.py        music: Windows media sessions (WinRT), per-app volume (Core Audio), launching music apps
      desktop.py      glue: auto-arm, session recaps, auto stats refresh, event bus
      api.py          /api/desktop/* (token-guarded)
 desktop/discord.js   Discord Rich Presence over Discord's local IPC pipe (no dependency)
@@ -148,6 +151,10 @@ Games found by several sources are deduplicated by install folder. Stale entries
 - **Auto-clip.** Highlights are saved a few seconds *after* the play, so the clip covers the run-up and the kill. A burst of kills (a triple, an ace) becomes one longer clip, not several. Valorant, Rocket League and CoD publish no live kill data, so they rely on the hotkey.
 - **Crash safety.** FFmpeg is bound to the backend with a Windows Job Object (`KILL_ON_JOB_CLOSE`), so a crashed backend can't leave a recorder filling the disk. Startup also sweeps for stray recorders from older runs, and the backend locks its data folder so only one copy ever runs: the app adopts a twin that answers with its launch token, or stops a leftover from an earlier launch and starts fresh.
 
+### Music
+
+Windows keeps a list of media sessions for every app that uses its media controls, the same list behind the volume flyout and keyboard media keys. Clutch reads that list through WinRT (`GlobalSystemMediaTransportControlsSessionManager`) on a worker thread: title, artist, album art, position and which controls the app allows. It can then play, pause, skip, seek, shuffle and repeat. That covers Spotify, the Apple Music app, YouTube Music (the Chrome web app is recognised by its app id; a browser tab shows as the browser) and most other players, with no accounts. Volume uses Core Audio sessions, which are per process, so YouTube Music in Chrome shares Chrome's volume.
+
 ### Security
 
 The desktop API can launch programs and delete files, so:
@@ -169,7 +176,7 @@ The Electron window runs sandboxed with context isolation. Links to other sites 
 ## Development
 
 ```bash
-cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 114 tests
+cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 120 tests
 cd frontend && npm test && npm run typecheck && npm run build
 cd desktop  && npm run check                                                  # syntax + node:test
 ```

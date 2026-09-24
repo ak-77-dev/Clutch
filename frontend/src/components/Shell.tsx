@@ -3,7 +3,8 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { bridge, desktop, isDesktop, useDesktopEvents, type Clip, type DesktopEvent, type DesktopStatus, type Settings } from '../desktop'
 import { fmtBytes, fmtHours, GAME_GLYPH, monogram } from '../format'
 import { useGames } from '../hooks'
-import { CameraIcon, ClipIcon, ClockIcon, GearIcon, HomeIcon, LibraryIcon, RecIcon, ReportIcon, StatsIcon, TargetIcon, UsersIcon } from './Icons'
+import { CameraIcon, ClipIcon, ClockIcon, GearIcon, HomeIcon, LibraryIcon, MusicIcon, RecIcon, ReportIcon, StatsIcon, TargetIcon, UsersIcon } from './Icons'
+import { MiniPlayer } from './Music'
 import { Onboarding } from './Onboarding'
 
 // ── shared desktop state ────────────────────────────────────────────────────
@@ -192,6 +193,9 @@ export function Rail() {
             <NavLink to="/friends" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
               <UsersIcon /> <span className="label-text">Friends</span>
             </NavLink>
+            <NavLink to="/music" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+              <MusicIcon /> <span className="label-text">Music</span>
+            </NavLink>
           </>
         )}
 
@@ -218,6 +222,7 @@ export function Rail() {
           <GearIcon /> <span className="label-text">Settings</span>
         </NavLink>
       </div>
+      {isDesktop && <MiniPlayer />}
       {isDesktop && <CaptureDock />}
     </nav>
   )

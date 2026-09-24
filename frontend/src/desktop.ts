@@ -216,7 +216,47 @@ export interface Settings {
   discord_client_id: string
   steamgriddb_key: string
   share_host: 'catbox' | 'litterbox'
+  hotkey_media_play: string
+  hotkey_media_next: string
+  hotkey_media_prev: string
+  music_duck: boolean
+  music_duck_level: number
 }
+
+export interface MediaSession {
+  id: string
+  title: string
+  artist: string
+  album: string
+  status: 'playing' | 'paused' | 'stopped' | 'closed' | 'opened' | 'changing'
+  position: number
+  duration: number
+  can: { play_pause: boolean; next: boolean; previous: boolean; seek: boolean; shuffle: boolean; repeat: boolean }
+  shuffle: boolean | null
+  repeat: 'none' | 'track' | 'list' | null
+  app: 'spotify' | 'applemusic' | 'ytmusic' | 'browser' | 'other'
+  app_name: string
+  art: string | null
+  volume: { level: number; muted: boolean } | null
+  volume_scope: 'app' | 'browser'
+}
+
+export interface MediaState {
+  available: boolean
+  current: string | null
+  sessions: MediaSession[]
+  at: number
+}
+
+export interface MusicApp {
+  key: 'spotify' | 'applemusic' | 'ytmusic'
+  name: string
+  accent: string
+  installed: boolean
+  opens: 'app' | 'web'
+}
+
+export type MediaAction = 'play_pause' | 'play' | 'pause' | 'next' | 'previous' | 'seek' | 'shuffle' | 'repeat'
 
 export interface ReportStats {
   games: number
@@ -349,6 +389,7 @@ export type DesktopEvent =
   | { type: 'report_ready'; at: number; report: Report }
   | { type: 'goal'; at: number; goal: Goal; state: GoalProgress['state'] }
   | { type: 'storage_cleaned'; at: number; count: number; bytes: number }
+  | ({ type: 'media' } & MediaState)
 
 // ── endpoints ────────────────────────────────────────────────────────────────
 
@@ -423,6 +464,14 @@ export const desktop = {
   autoclip: () => call<AutoClipGame[]>('/autoclip'),
   installAutoclip: (id: string) => post<{ path: string }>(`/autoclip/${enc(id)}/install`),
   keys: () => call<ApiKeys>('/keys'),
+
+  // music (Windows media sessions: Spotify, Apple Music, YouTube Music, ...)
+  media: () => call<MediaState>('/media'),
+  mediaCommand: (action: MediaAction, session?: string | null, value?: unknown) => post<MediaState & { ok: boolean }>(`/media/${action}`, { session, value }),
+  mediaVolume: (session: string, patch: { level?: number; muted?: boolean }) => post<MediaState & { ok: boolean }>('/media/volume', { session, ...patch }),
+  mediaArt: (key: string) => mediaUrl(`/media/art/${key}`),
+  musicApps: () => call<MusicApp[]>('/media/apps'),
+  launchMusicApp: (key: string) => post<{ opened: 'app' | 'web' }>(`/media/apps/${key}/launch`),
   saveKeys: (values: Record<string, string | null>) => call<ApiKeys>('/keys', { method: 'PUT', body: JSON.stringify(values) }),
 }
 
@@ -435,7 +484,7 @@ let source: EventSource | null = null
 function ensureSource() {
   if (source || !isDesktop) return
   source = new EventSource(mediaUrl('/events'))
-  const types: DesktopEvent['type'][] = ['clip_saved', 'clip_updated', 'clip_saving', 'buffer', 'recording', 'game_started', 'session_end', 'launching', 'stats_synced', 'error', 'highlight', 'report_ready', 'goal', 'storage_cleaned']
+  const types: DesktopEvent['type'][] = ['clip_saved', 'clip_updated', 'clip_saving', 'buffer', 'recording', 'game_started', 'session_end', 'launching', 'stats_synced', 'error', 'highlight', 'report_ready', 'goal', 'storage_cleaned', 'media']
   for (const t of types) {
     source.addEventListener(t, (msg) => {
       const event = JSON.parse((msg as MessageEvent).data) as DesktopEvent

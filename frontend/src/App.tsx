@@ -15,6 +15,7 @@ const Playtime = lazy(() => import('./pages/Playtime').then((m) => ({ default: m
 const Sessions = lazy(() => import('./pages/Sessions').then((m) => ({ default: m.Sessions })))
 const Goals = lazy(() => import('./pages/Goals').then((m) => ({ default: m.Goals })))
 const Friends = lazy(() => import('./pages/Friends').then((m) => ({ default: m.Friends })))
+const Music = lazy(() => import('./pages/Music').then((m) => ({ default: m.Music })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
 function TopBar() {
@@ -70,6 +71,7 @@ export default function App() {
               <Route path="/sessions" element={<Page><Sessions /></Page>} />
               <Route path="/goals" element={<Page><Goals /></Page>} />
               <Route path="/friends" element={<Page><Friends /></Page>} />
+              <Route path="/music" element={<Page><Music /></Page>} />
               <Route path="/settings" element={<Page><SettingsPage /></Page>} />
               <Route path="/stats" element={<Page><StatsHub /></Page>} />
               <Route path="/:game" element={<Page><StatsHub /></Page>} />

@@ -2,7 +2,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('node:path')
-const { findPython, parseSSE, overlayFor, pressFeedback, sessionNotification, hours } = require('../lib')
+const { findPython, musicFeedback, parseSSE, overlayFor, pressFeedback, sessionNotification, hours } = require('../lib')
 
 test('findPython prefers the env override, then the backend venv', () => {
   assert.equal(findPython('/b', { CLUTCH_PYTHON: '/custom/python' }), '/custom/python')
@@ -70,4 +70,11 @@ test('highlight, goal and report notifications', () => {
   assert.equal(r.title, 'Dota 2 report card · 3W 2L')
   assert.equal(eventNotification({ type: 'goal', state: 'done', goal: { kind: 'rank', label: 'Diamond 1' } }).body, 'Reached Diamond 1')
   assert.equal(eventNotification({ type: 'buffer' }), null)
+})
+
+test('media hotkey toasts say what is playing now', () => {
+  const state = { sessions: [{ title: 'Kaun Tujhe', artist: 'Armaan Malik', app_name: 'YouTube Music', status: 'playing' }] }
+  assert.deepEqual(musicFeedback('next', state), { title: '⏭ Kaun Tujhe', sub: 'Armaan Malik · YouTube Music', tone: 'info', sound: null })
+  assert.equal(musicFeedback('play_pause', { sessions: [{ ...state.sessions[0], status: 'paused' }] }).title, '⏸ Kaun Tujhe')
+  assert.equal(musicFeedback('next', { sessions: [] }).title, 'Nothing playing')
 })

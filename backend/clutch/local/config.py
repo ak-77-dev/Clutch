@@ -97,6 +97,12 @@ class Settings:
     discord_client_id: str = ""  # your Discord application's ID (discord.com/developers)
     steamgriddb_key: str = ""  # free key from steamgriddb.com/profile/preferences/api
     share_host: str = "catbox"  # catbox (permanent) | litterbox (expires after 72 h)
+    # Music: media keys that work in game, and turning music apps down while you play
+    hotkey_media_play: str = "Ctrl+Alt+P"
+    hotkey_media_next: str = "Ctrl+Alt+Right"
+    hotkey_media_prev: str = "Ctrl+Alt+Left"
+    music_duck: bool = False
+    music_duck_level: int = 30  # percent of the app's volume while a game runs
 
     def __post_init__(self) -> None:
         if not self.clips_dir:
@@ -159,6 +165,8 @@ class SettingsStore:
                 raise ValueError("bitrate_mbps must be between 5 and 150")
             if data["storage_max_days"] < 0 or data["storage_max_gb"] < 0:
                 raise ValueError("storage limits can't be negative")
+            if not 0 <= data["music_duck_level"] <= 100:
+                raise ValueError("music_duck_level is a percentage (0-100)")
             self.settings = Settings(**data)
             self.path.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
         for fn in self._listeners:

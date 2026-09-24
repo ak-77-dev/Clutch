@@ -280,7 +280,7 @@ function SettingsInner() {
       <div className="page-head" data-echo="settings">
         <div>
           <div className="kicker bare">
-            <b>07</b> Settings
+            <b>08</b> Settings
           </div>
           <h1>
             Dial it <em>in</em>

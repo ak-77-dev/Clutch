@@ -6,12 +6,14 @@ export, so originals are never changed.
 
 from __future__ import annotations
 
+import functools
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from clutch.local.capture import media_info, pick_encoder, run_ffmpeg
+from clutch.local.capture import ffmpeg_exe, media_info, pick_encoder, run_ffmpeg
 
 FONT_CANDIDATES = (
     r"C:\Windows\Fonts\impact.ttf",
@@ -96,11 +98,23 @@ def montage(
     return dest
 
 
+@functools.cache
+def has_filter(name: str) -> bool:
+    """Whether this FFmpeg build has a filter (Linux builds of imageio-ffmpeg lack drawtext)."""
+    try:
+        out = subprocess.run([ffmpeg_exe(), "-hide_banner", "-filters"], capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return any(line.split()[1:2] == [name] for line in out.splitlines() if line.strip())
+
+
 def caption(source: Path, dest: Path, text: str, *, position: str = "bottom", size: int = 64, encoder: str = "auto") -> Path:
     """Burn a caption in (meme style: white with a black outline)."""
     text = text.strip()
     if not text:
         raise ValueError("Caption text is empty")
+    if not has_filter("drawtext"):
+        raise RuntimeError("This FFmpeg build can't draw text (no drawtext filter)")
     font = next((f for f in FONT_CANDIDATES if os.path.exists(f)), None)
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
         fh.write(text)  # textfile= avoids escaping quotes, colons and emoji in the filter string

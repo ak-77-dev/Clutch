@@ -19,8 +19,14 @@ KEYS: list[dict[str, str]] = [
     {"name": "BALLCHASING_API_KEY", "game": "rocketleague", "label": "ballchasing.com token", "help": "https://ballchasing.com/upload"},
     # Experimental: the ACT_SSO_COOKIE value from a signed-in callofduty.com session.
     {"name": "COD_SSO_TOKEN", "game": "cod", "label": "Activision SSO token", "help": "https://www.callofduty.com"},
+    {"name": "FACEIT_API_KEY", "game": "cs2", "label": "FACEIT server key (CS2)", "help": "https://developers.faceit.com"},
+    {"name": "PUBG_API_KEY", "game": "pubg", "label": "PUBG API key", "help": "https://developer.pubg.com"},
+    {"name": "BRAWLSTARS_API_KEY", "game": "brawlstars", "label": "Brawl Stars API key", "help": "https://developer.brawlstars.com"},
+    {"name": "CLASHROYALE_API_KEY", "game": "clashroyale", "label": "Clash Royale API key", "help": "https://developer.clashroyale.com"},
+    {"name": "OSU_CLIENT_ID", "game": "osu", "label": "osu! OAuth client ID", "help": "https://osu.ppy.sh/home/account/edit#oauth"},
+    {"name": "OSU_CLIENT_SECRET", "game": "osu", "label": "osu! OAuth client secret", "help": "https://osu.ppy.sh/home/account/edit#oauth"},
 ]
-PLAIN = {"LOL_PLATFORM"}  # not secret: shown as-is
+PLAIN = {"LOL_PLATFORM", "PUBG_SHARD"}  # not secret: shown as-is
 NAMES = {k["name"] for k in KEYS} | PLAIN
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 

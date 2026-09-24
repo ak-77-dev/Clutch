@@ -44,6 +44,8 @@ STATS_GAMES = {
     "steam:252950": "rocketleague",
     "steam:570": "dota2",
     "steam:1422450": "deadlock",
+    "steam:730": "cs2",
+    "steam:578080": "pubg",
     "bnet:auks": "cod",
     "bnet:odin": "cod",
 }

@@ -9,7 +9,20 @@ from clutch.store import Store
 
 @pytest.fixture(autouse=True)
 def _no_keys(monkeypatch):
-    for var in ("RIOT_API_KEY", "HENRIK_API_KEY", "BALLCHASING_API_KEY", "OPENDOTA_API_KEY", "COD_SSO_TOKEN", "CLUTCH_DESKTOP"):
+    for var in (
+        "RIOT_API_KEY",
+        "HENRIK_API_KEY",
+        "BALLCHASING_API_KEY",
+        "OPENDOTA_API_KEY",
+        "COD_SSO_TOKEN",
+        "FACEIT_API_KEY",
+        "PUBG_API_KEY",
+        "BRAWLSTARS_API_KEY",
+        "CLASHROYALE_API_KEY",
+        "OSU_CLIENT_ID",
+        "OSU_CLIENT_SECRET",
+        "CLUTCH_DESKTOP",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 

@@ -44,16 +44,25 @@ def test_errors(api):
 
 def test_games_and_recent(api):
     games = api.get("/api/games").json()
-    assert [g["id"] for g in games] == ["lol", "valorant", "rocketleague", "dota2", "deadlock", "cod"]
-    # Keyed games are off without keys; OpenDota and deadlock-api.com need none.
-    assert {g["id"]: g["configured"] for g in games} == {
-        "lol": False,
-        "valorant": False,
-        "rocketleague": False,
-        "dota2": True,
-        "deadlock": True,
-        "cod": False,
-    }
+    ids = [
+        "lol",
+        "valorant",
+        "cs2",
+        "rocketleague",
+        "dota2",
+        "deadlock",
+        "cod",
+        "tft",
+        "pubg",
+        "brawlstars",
+        "clashroyale",
+        "osu",
+        "chesscom",
+        "lichess",
+    ]
+    assert [g["id"] for g in games] == ids
+    # Keyed games are off without keys; OpenDota, deadlock-api.com, Chess.com and Lichess need none.
+    assert {g["id"] for g in games if g["configured"]} == {"dota2", "deadlock", "chesscom", "lichess"}
     api.get("/api/valorant/search", params={"q": "demo"})
     assert api.get("/api/recent").json()[0]["game"] == "valorant"
 

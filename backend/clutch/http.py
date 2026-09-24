@@ -81,12 +81,23 @@ class JsonClient:
         self.timeout = timeout
         self._sleep = sleep
 
-    def get(self, url: str, params: dict[str, Any] | None = None) -> Any:
+    def get(self, url: str, params: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None) -> Any:
+        return self._request(url, params, headers).json()
+
+    def get_ndjson(self, url: str, params: dict[str, Any] | None = None) -> list[Any]:
+        """Newline-delimited JSON (e.g. Lichess game exports): one object per line."""
+        import json
+
+        text = self._request(url, params, {"Accept": "application/x-ndjson"}).text
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def _request(self, url: str, params: dict[str, Any] | None, headers: dict[str, str] | None) -> Any:
+        extra = {"headers": headers} if headers else {}  # keeps simple test sessions working
         for attempt in range(self.max_retries + 1):
             if self.limiter:
                 self.limiter.acquire()
             try:
-                resp = self.session.get(url, params=params, timeout=self.timeout)
+                resp = self.session.get(url, params=params, timeout=self.timeout, **extra)
             except requests.RequestException as exc:
                 if attempt == self.max_retries:
                     raise ApiError(f"network error: {exc}") from exc
@@ -111,5 +122,5 @@ class JsonClient:
                 continue
             if resp.status_code >= 400:
                 raise ApiError(f"upstream error HTTP {resp.status_code}", resp.status_code)
-            return resp.json()
+            return resp
         raise ApiError("retries exhausted")  # pragma: no cover

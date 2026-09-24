@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { FactorsChart, FormChart, RankChart, TiltChart, TrendChart } from '../components/Charts'
 import { MatchCard, MatchClipsContext } from '../components/MatchCard'
@@ -87,7 +87,7 @@ export function ProfilePage() {
             'search any player above to see real data.'
           ) : (
             <>
-              add an API key in <code>backend/.env</code> to look up real players.
+              add a key in {isDesktop ? <Link to="/settings">Settings → API keys</Link> : <code>backend/.env</code>} to look up real players.
             </>
           )}
         </div>

@@ -168,3 +168,21 @@ export function estimateSize(
   mbps = Math.round(mbps)
   return { mbps, perClip: fmtBytes((mbps * 1e6 * s.buffer_seconds) / 8) }
 }
+
+/** Short tags for the rail and ticker (three characters at most, to fit the glyph box). */
+export const GAME_GLYPH: Record<string, string> = {
+  lol: 'LOL',
+  valorant: 'VAL',
+  cs2: 'CS2',
+  rocketleague: 'RL',
+  dota2: 'D2',
+  deadlock: 'DL',
+  cod: 'COD',
+  tft: 'TFT',
+  pubg: 'PBG',
+  brawlstars: 'BS',
+  clashroyale: 'CR',
+  osu: 'OSU',
+  chesscom: 'CC',
+  lichess: 'LI',
+}

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { FactorsChart, FormChart, RankChart, TiltChart, TrendChart } from '../components/Charts'
-import { MatchCard } from '../components/MatchCard'
+import { MatchCard, MatchClipsContext } from '../components/MatchCard'
+import { useDesktop } from '../components/Shell'
+import { desktop, isDesktop } from '../desktop'
 import { Portrait } from '../components/Portrait'
 import { CharacterTable, Insights, RankCard, SimpleGroupTable, StatTiles } from '../components/ProfileBits'
 import { fmtWinRate, plural, timeAgo } from '../format'
@@ -16,6 +18,9 @@ export function ProfilePage() {
   const [params, setParams] = useSearchParams()
   const tab = (params.get('tab') as Tab) || 'overview'
   const data = useAsync(() => api.overview(game, key), [game, key])
+  const { settings } = useDesktop()
+  const own = isDesktop && settings?.linked_profiles[game] === key
+  const clips = useAsync(() => (own ? desktop.matchClips(game, key).catch(() => ({})) : Promise.resolve({})), [game, key, own])
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
@@ -44,6 +49,7 @@ export function ProfilePage() {
 
   const characterFilter = params.get('character') ?? undefined
   return (
+    <MatchClipsContext.Provider value={clips.data ?? {}}>
     <div style={{ '--accent': g.accent } as React.CSSProperties}>
       <header className="profile-head">
         <div className="avatar">
@@ -133,6 +139,7 @@ export function ProfilePage() {
       )}
       {tab === 'insights' && <InsightsTab r={r} />}
     </div>
+    </MatchClipsContext.Provider>
   )
 }
 

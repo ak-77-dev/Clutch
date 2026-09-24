@@ -29,6 +29,8 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T
 }
 
 export const GamesContext = createContext<Game[]>([])
+/** Re-fetch the game list (e.g. after API keys change which games have live data). */
+export const GamesReloadContext = createContext<() => void>(() => {})
 
 export function useGames(): Game[] {
   return useContext(GamesContext)
@@ -36,4 +38,8 @@ export function useGames(): Game[] {
 
 export function useGame(id: string | undefined): Game | undefined {
   return useGames().find((g) => g.id === id)
+}
+
+export function useReloadGames(): () => void {
+  return useContext(GamesReloadContext)
 }

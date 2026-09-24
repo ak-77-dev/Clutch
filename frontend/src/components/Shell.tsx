@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { bridge, desktop, isDesktop, useDesktopEvents, type Clip, type DesktopEvent, type DesktopStatus, type Settings } from '../desktop'
-import { fmtHours, monogram } from '../format'
+import { fmtBytes, fmtHours, monogram } from '../format'
 import { useGames } from '../hooks'
-import { CameraIcon, ClipIcon, ClockIcon, GearIcon, HomeIcon, LibraryIcon, RecIcon, StatsIcon } from './Icons'
+import { CameraIcon, ClipIcon, ClockIcon, GearIcon, HomeIcon, LibraryIcon, RecIcon, ReportIcon, StatsIcon, TargetIcon, UsersIcon } from './Icons'
+import { Onboarding } from './Onboarding'
 
 // ── shared desktop state ────────────────────────────────────────────────────
 
@@ -68,6 +69,20 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
       toast({ title: `${e.game_name} · ${fmtHours(e.seconds)}`, sub: `Session over${e.clips ? ` · ${e.clips} clip${e.clips > 1 ? 's' : ''}` : ''}` })
     } else if (e.type === 'stats_synced' && e.new > 0) {
       toast({ title: `${e.new} new match${e.new > 1 ? 'es' : ''} synced`, sub: e.game })
+    } else if (e.type === 'highlight') {
+      toast({ title: `Auto-clip · ${e.title}`, sub: 'Saving a few seconds after the play' })
+    } else if (e.type === 'report_ready') {
+      const st = e.report.stats
+      toast({
+        title: `${e.report.game_name} report card`,
+        sub: st ? `${st.wins}W ${st.losses}L · ${fmtHours(e.report.seconds)}` : `${fmtHours(e.report.seconds)} · ${e.report.clips.length} clips`,
+        onClick: () => navigate('/sessions'),
+      })
+    } else if (e.type === 'goal') {
+      const title = e.state === 'done' ? 'Goal reached' : e.state === 'over' ? 'Over your daily cap' : 'Close to your daily cap'
+      toast({ title, sub: `${e.goal.progress.value ?? ''} ${e.goal.progress.unit}`.trim(), tone: e.state === 'over' ? 'error' : 'ok', onClick: () => navigate('/goals') })
+    } else if (e.type === 'storage_cleaned') {
+      toast({ title: `Cleaned up ${e.count} old clip${e.count === 1 ? '' : 's'}`, sub: `${fmtBytes(e.bytes)} moved to the Recycle Bin` })
     } else if (e.type === 'error') {
       toast({ title: 'Something went wrong', sub: e.message, tone: 'error' })
     }
@@ -76,6 +91,7 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={{ status, settings, refresh, setSettings, toast }}>
       {children}
+      {isDesktop && <Onboarding />}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.tone === 'error' ? 'error' : ''}`} onClick={t.onClick} style={{ cursor: t.onClick ? 'pointer' : undefined }}>
@@ -160,6 +176,19 @@ export function Rail() {
         <NavLink to="/playtime" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
           <ClockIcon /> <span className="label-text">Playtime</span>
         </NavLink>
+        {isDesktop && (
+          <>
+            <NavLink to="/sessions" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+              <ReportIcon /> <span className="label-text">Sessions</span>
+            </NavLink>
+            <NavLink to="/goals" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+              <TargetIcon /> <span className="label-text">Goals</span>
+            </NavLink>
+            <NavLink to="/friends" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+              <UsersIcon /> <span className="label-text">Friends</span>
+            </NavLink>
+          </>
+        )}
 
         <div className="rail-group kicker">
           <b>//</b> Stats

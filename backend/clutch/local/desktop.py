@@ -227,6 +227,22 @@ class Desktop:
         self.events.publish("buffer", **status)
         return status
 
+    # ── API keys ────────────────────────────────────────────────────────────
+    def keys_view(self) -> dict[str, Any]:
+        from clutch.local import keys
+
+        return keys.status()
+
+    def set_keys(self, values: dict[str, Any]) -> dict[str, Any]:
+        from clutch.local import keys
+
+        result = keys.update(values)
+        if self.stats is not None:  # providers read their key at construction
+            from clutch.games import default_providers
+
+            self.stats.providers = {p.meta.id: p for p in default_providers()}
+        return result
+
     def capabilities(self) -> dict[str, Any]:
         """What this PC can record with: encoders per codec, and audio devices."""
         from clutch.local.capture import capabilities, list_audio_devices

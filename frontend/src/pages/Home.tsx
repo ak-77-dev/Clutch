@@ -5,12 +5,14 @@ import { ClipTile } from '../components/ClipTile'
 import { GameTile } from '../components/GameTile'
 import { ClipIcon, PlayIcon } from '../components/Icons'
 import { Portrait } from '../components/Portrait'
+import { ReportCard } from '../components/ReportCard'
 import { SearchBar } from '../components/SearchBar'
 import { useDesktop } from '../components/Shell'
 import { desktop, isDesktop, useDesktopEvents } from '../desktop'
 import { fmtHours, hoursNumber, monogram } from '../format'
 import { useAsync, useGames } from '../hooks'
 import type { MatchSummary } from '../types'
+import { GoalRow } from './Goals'
 import { useLaunch } from './Library'
 
 const BLURB: Record<string, string> = {
@@ -36,11 +38,17 @@ function Dashboard() {
   const launch = useLaunch()
   const navigate = useNavigate()
   const data = useAsync(async () => {
-    const [lib, clips, pt] = await Promise.all([desktop.library(), desktop.clips(), desktop.playtime(14)])
-    return { lib, clips: clips.items, pt }
+    const [lib, clips, pt, reports, goals] = await Promise.all([
+      desktop.library(),
+      desktop.clips(),
+      desktop.playtime(14),
+      desktop.reports(1).catch(() => []),
+      desktop.goals().catch(() => []),
+    ])
+    return { lib, clips: clips.items, pt, report: reports[0] ?? null, goals }
   }, [])
   useDesktopEvents((e) => {
-    if (e.type === 'clip_saved' || e.type === 'clip_updated' || e.type === 'session_end' || e.type === 'game_started') data.reload()
+    if (['clip_saved', 'clip_updated', 'session_end', 'game_started', 'report_ready', 'goal'].includes(e.type)) data.reload()
   })
   const linked = Object.entries(settings?.linked_profiles ?? {})
   const ticker = useAsync(async () => {
@@ -195,6 +203,32 @@ function Dashboard() {
               </div>
             )}
           </div>
+          {data.data?.report && (
+            <div className="card">
+              <div className="spread" style={{ marginBottom: 14 }}>
+                <h2 style={{ margin: 0 }}>Last session</h2>
+                <Link className="btn small" to="/sessions">
+                  All
+                </Link>
+              </div>
+              <ReportCard report={data.data.report} compact />
+            </div>
+          )}
+          {(data.data?.goals.length ?? 0) > 0 && (
+            <div className="card">
+              <div className="spread" style={{ marginBottom: 14 }}>
+                <h2 style={{ margin: 0 }}>Goals</h2>
+                <Link className="btn small" to="/goals">
+                  Edit
+                </Link>
+              </div>
+              <div className="goals">
+                {data.data!.goals.slice(0, 4).map((g) => (
+                  <GoalRow key={g.id} goal={g} gameName={g.game_id ? (games.find((x) => x.id === g.game_id)?.name ?? lib.find((x) => x.id === g.game_id)?.name) : undefined} />
+                ))}
+              </div>
+            </div>
+          )}
           {topWeek.length > 0 && (
             <div className="card">
               <h2>This week</h2>

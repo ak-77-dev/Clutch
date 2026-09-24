@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ClipTile } from '../components/ClipTile'
 import { ClipViewer } from '../components/ClipViewer'
-import { FolderIcon, SearchIcon, StarIcon } from '../components/Icons'
+import { CloseIcon, FilmIcon, FolderIcon, SearchIcon, StarIcon } from '../components/Icons'
 import { useDesktop } from '../components/Shell'
 import { desktop, useDesktopEvents, type Clip } from '../desktop'
 import { fmtBytes, fmtHours } from '../format'
@@ -45,7 +45,10 @@ function ClipsInner() {
   const game = params.get('game') ?? ''
   const openId = Number(params.get('open')) || null
   const clips = useAsync(() => desktop.clips({ kind, favorites, q: q.trim() || undefined }), [kind, favorites, q])
-  const { status, toast } = useDesktop()
+  const { status, settings, toast } = useDesktop()
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<number[]>([])
+  const [making, setMaking] = useState(false)
 
   useDesktopEvents((e) => {
     if (e.type === 'clip_saved' || e.type === 'clip_updated') clips.reload()
@@ -84,6 +87,31 @@ function ClipsInner() {
     setParams(next, { replace: true })
   }
 
+  function toggle(id: number) {
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
+  }
+
+  function stopPicking() {
+    setPicking(false)
+    setPicked([])
+  }
+
+  async function makeMontage() {
+    setMaking(true)
+    try {
+      const clip = await desktop.montage(picked)
+      toast({ title: 'Montage saved', sub: clip.title })
+      stopPicking()
+      clips.reload()
+      setOpen(clip.id)
+    } catch (e) {
+      toast({ title: 'Montage failed', sub: (e as Error).message, tone: 'error' })
+    } finally {
+      setMaking(false)
+    }
+  }
+
+  const pickedSeconds = picked.reduce((s, id) => s + (all.find((c) => c.id === id)?.duration ?? 0), 0)
   const stats = clips.data?.stats
   return (
     <div>
@@ -102,6 +130,9 @@ function ClipsInner() {
               {stats.count} files · {fmtBytes(stats.bytes)} · {fmtHours(stats.seconds)} of footage
             </span>
           )}
+          <button className="btn" aria-pressed={picking} onClick={() => (picking ? stopPicking() : setPicking(true))}>
+            <FilmIcon /> {picking ? 'Cancel' : 'Montage'}
+          </button>
           {status?.clips_dir && (
             <button
               className="btn"
@@ -154,7 +185,8 @@ function ClipsInner() {
       ) : shown.length === 0 ? (
         <div className="card empty">
           <span className="display">No clips yet</span>
-          Hit <b className="mono">{'F8'}</b> in game to save the last few seconds, <b className="mono">F9</b> to record, <b className="mono">F10</b> for a screenshot.
+          Hit <b className="mono">{settings?.hotkey_clip ?? 'F8'}</b> in game to save the last {settings?.buffer_seconds ?? 60} seconds,{' '}
+          <b className="mono">{settings?.hotkey_record ?? 'F9'}</b> to record, <b className="mono">{settings?.hotkey_screenshot ?? 'F10'}</b> for a screenshot.
         </div>
       ) : (
         groupByDay(shown).map(([day, list]) => (
@@ -164,11 +196,32 @@ function ClipsInner() {
             </div>
             <div className="clip-grid">
               {list.map((c) => (
-                <ClipTile key={c.id} clip={c} onOpen={() => setOpen(c.id)} />
+                <ClipTile
+                  key={c.id}
+                  clip={c}
+                  order={picking ? picked.indexOf(c.id) + 1 || null : undefined}
+                  onOpen={() => (picking ? c.kind !== 'screenshot' && toggle(c.id) : setOpen(c.id))}
+                />
               ))}
             </div>
           </section>
         ))
+      )}
+
+      {picking && (
+        <div className="pick-bar" role="toolbar" aria-label="Montage">
+          <span className="n">{picked.length}</span>
+          <div style={{ minWidth: 0 }}>
+            <div className="t">{picked.length ? `${picked.length} clip${picked.length > 1 ? 's' : ''} · ${Math.round(pickedSeconds)}s` : 'Pick clips in the order they should play'}</div>
+            <div className="s">Back to back at 1080p60, with a quick fade through black between clips</div>
+          </div>
+          <button className="btn primary" disabled={picked.length < 2 || making} onClick={() => void makeMontage()}>
+            <FilmIcon /> {making ? 'Rendering…' : 'Make montage'}
+          </button>
+          <button className="icon-btn" onClick={stopPicking} aria-label="Cancel">
+            <CloseIcon />
+          </button>
+        </div>
       )}
 
       {openIdx >= 0 && (

@@ -6,7 +6,8 @@ const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification } = require('./lib')
+const { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification } = require('./lib')
+const { DiscordPresence, activityFor } = require('./discord')
 
 const ROOT = path.resolve(__dirname, '..')
 const BACKEND_DIR = process.env.CLUTCH_BACKEND_DIR || path.join(ROOT, 'backend')
@@ -19,6 +20,9 @@ let backend = null
 let win = null
 let tray = null
 let overlay = null
+let panel = null
+let panelShown = false
+let discord = null
 let quitting = false
 let settings = {}
 let buffer = { active: false, recording: false }
@@ -44,33 +48,123 @@ async function call(p, init = {}) {
 
 // ── backend ────────────────────────────────────────────────────────────────
 
+/** How to run the backend: the bundled exe in an installed build, the repo's venv in development. */
+function backendCommand() {
+  const args = ['serve', '--desktop', '--port', String(port)]
+  if (app.isPackaged) {
+    const home = path.join(app.getPath('appData'), 'Clutch') // API keys (.env) and the stats database live here
+    fs.mkdirSync(home, { recursive: true })
+    return {
+      cmd: path.join(process.resourcesPath, 'backend', 'clutch-backend.exe'),
+      args,
+      cwd: home,
+      env: { CLUTCH_STATIC_DIR: path.join(process.resourcesPath, 'frontend'), CLUTCH_DB: path.join(home, 'clutch.db') },
+    }
+  }
+  return { cmd: findPython(BACKEND_DIR), args: ['-m', 'clutch.cli', ...args], cwd: BACKEND_DIR, env: {} }
+}
+
+const ALREADY_RUNNING = 75 // the backend's exit code when another backend owns the data folder
+const LOG_PATH = () => path.join(app.getPath('userData'), 'backend.log')
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Start the backend and wait until it answers with our token.
+ *
+ * The backend holds a lock on its data folder, so a second copy exits with ALREADY_RUNNING
+ * instead of fighting over the port. That covers two cases seen on Windows:
+ *  - a twin of our own child (same command line, same token) came up first, e.g. on the
+ *    first launch of a freshly installed build: we adopt it, since it answers with our token;
+ *  - a backend left over from an older launch (another token): we stop it and start ours.
+ */
 async function startBackend() {
-  port = await freePort()
-  const python = findPython(BACKEND_DIR)
-  const log = fs.createWriteStream(path.join(app.getPath('userData'), 'backend.log'), { flags: 'a' })
-  log.write(`\n--- ${new Date().toISOString()} starting ${python} on ${port}\n`)
-  backend = spawn(python, ['-m', 'clutch.cli', 'serve', '--desktop', '--port', String(port)], {
-    cwd: BACKEND_DIR, // so the backend finds its .env (API keys) and stats database
-    env: { ...process.env, CLUTCH_TOKEN: TOKEN, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
-    windowsHide: true,
-  })
-  backend.stdout.pipe(log)
-  backend.stderr.pipe(log)
-  backend.on('exit', (code) => {
-    backend = null
-    if (!quitting) fatal(new Error(`Clutch's local service stopped (exit ${code}). See ${path.join(app.getPath('userData'), 'backend.log')}`))
-  })
-  const deadline = Date.now() + 45_000
+  const log = fs.createWriteStream(LOG_PATH(), { flags: 'a' })
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    port = await freePort()
+    const run = backendCommand()
+    log.write(`\n--- ${new Date().toISOString()} starting ${run.cmd} on ${port}\n`)
+    const child = spawn(run.cmd, run.args, {
+      cwd: run.cwd, // the backend reads its .env (API keys) and stats database from here
+      env: { ...process.env, ...run.env, CLUTCH_TOKEN: TOKEN, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+      windowsHide: true,
+    })
+    backend = child
+    child.stdout.pipe(log, { end: false })
+    child.stderr.pipe(log, { end: false })
+    child.on('exit', (code) => {
+      if (backend === child) backend = null
+      if (quitting || code === ALREADY_RUNNING || !backendPid) return
+      if (!adopted) fatal(new Error(`Clutch's local service stopped (exit ${code}). See ${LOG_PATH()}`))
+    })
+
+    const health = await waitForHealth(child)
+    if (health && (await tokenAccepted())) {
+      backendPid = health.pid
+      if (child.exitCode === ALREADY_RUNNING) adopt(health.pid, log)
+      return
+    }
+    if (child.exitCode !== ALREADY_RUNNING) break
+    stopStaleBackend(log)
+    await sleep(1500)
+  }
+  throw new Error(`Clutch’s local service didn’t start. See ${LOG_PATH()}`)
+}
+
+let backendPid = null
+let adopted = false
+
+/** Poll /api/health until a desktop backend answers (ours, or a twin on our port). */
+async function waitForHealth(child) {
+  let deadline = Date.now() + 45_000
   while (Date.now() < deadline) {
+    if (child.exitCode !== null && child.exitCode !== ALREADY_RUNNING) return null // crashed: the log says why
+    if (child.exitCode === ALREADY_RUNNING) deadline = Math.min(deadline, Date.now() + 8000) // give a twin a moment
     try {
       const res = await fetch(api('/api/health'))
-      if (res.ok && (await res.json()).desktop) return
+      const body = res.ok ? await res.json() : null
+      if (body?.desktop) return body
     } catch {
       /* not up yet */
     }
-    await new Promise((r) => setTimeout(r, 250))
+    await sleep(250)
   }
-  throw new Error('Clutch’s local service didn’t start in time. Is the backend installed? (cd backend && pip install -e ".[desktop]")')
+  return null
+}
+
+async function tokenAccepted() {
+  try {
+    await call('/api/desktop/settings')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Our child lost the lock to a twin that serves us; watch it like our own. */
+function adopt(pid, log) {
+  adopted = true
+  log.write(`--- adopted backend pid ${pid} on ${port} (a twin took the data-folder lock)\n`)
+  const timer = setInterval(() => {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      clearInterval(timer)
+      if (!quitting) fatal(new Error(`Clutch's local service stopped. See ${LOG_PATH()}`))
+    }
+  }, 5000)
+}
+
+function stopStaleBackend(log) {
+  const home = process.env.CLUTCH_HOME || path.join(app.getPath('appData'), 'Clutch')
+  try {
+    const [pid] = fs.readFileSync(path.join(home, 'backend.pid'), 'utf8').trim().split(/\s+/).map(Number)
+    if (pid && pid !== process.pid) {
+      log.write(`--- stopping a Clutch backend left over from an earlier launch (pid ${pid})\n`)
+      process.kill(pid)
+    }
+  } catch {
+    /* no pid file, or it's already gone */
+  }
 }
 
 function fatal(err) {
@@ -155,6 +249,74 @@ function createOverlay() {
   overlay.loadFile(path.join(__dirname, 'overlay.html'))
 }
 
+/** The in-game session panel: time played, today's record, clips, daily cap. Click-through, never focused. */
+function createPanel() {
+  const { workArea } = screen.getPrimaryDisplay()
+  panel = new BrowserWindow({
+    width: 310,
+    height: 190,
+    x: workArea.x + 8,
+    y: workArea.y + 8,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    hasShadow: false,
+    webPreferences: { contextIsolation: true, sandbox: true },
+  })
+  panel.setAlwaysOnTop(true, 'screen-saver')
+  panel.setIgnoreMouseEvents(true)
+  panel.loadFile(path.join(__dirname, 'overlay-panel.html'))
+}
+
+async function refreshPanel() {
+  if (!panel) return
+  let session = null
+  try {
+    session = await call('/api/desktop/session')
+  } catch {
+    return
+  }
+  updatePresence(session)
+  const visible = Boolean(settings.overlay_enabled && panelShown && session?.playing)
+  panel.webContents.executeJavaScript(`window.render(${JSON.stringify(session)}, ${JSON.stringify(settings.hotkey_overlay || '')})`).catch(() => {})
+  if (visible && !panel.isVisible()) panel.showInactive()
+  if (!visible && panel.isVisible()) panel.hide()
+}
+
+// ── Discord Rich Presence ──────────────────────────────────────────────────
+
+let presenceStart = null
+async function syncDiscord() {
+  const want = settings.discord_rpc && settings.discord_client_id
+  if (!want) {
+    if (discord) discord.close()
+    discord = null
+    return
+  }
+  if (discord && discord.clientId === settings.discord_client_id && discord.ready) return
+  if (discord) discord.close()
+  discord = new DiscordPresence(settings.discord_client_id)
+  const ok = await discord.connect()
+  if (!ok) flash({ title: 'Discord', sub: `Rich Presence: ${discord.lastError}`, tone: 'error' })
+}
+
+function updatePresence(session) {
+  if (!discord?.ready) return
+  const game = session?.playing
+  if (!game) {
+    presenceStart = null
+    discord.clear()
+    return
+  }
+  presenceStart = presenceStart || game.started_at
+  discord.setActivity(activityFor(session, presenceStart))
+}
+
 let overlayTimer = null
 function flash(msg) {
   if (!overlay || !msg) return
@@ -175,7 +337,9 @@ function trayMenu() {
     { label: 'Screenshot', accelerator: settings.hotkey_screenshot, click: () => action('screenshot') },
     { label: 'Replay buffer', type: 'checkbox', checked: Boolean(buffer.active), click: (item) => call('/api/desktop/capture/buffer', { method: 'POST', body: JSON.stringify({ on: item.checked }) }).catch(() => {}) },
     { type: 'separator' },
+    { label: 'Session panel in game', type: 'checkbox', checked: Boolean(settings.overlay_enabled), accelerator: settings.hotkey_overlay, click: () => togglePanel() },
     { label: 'Open clips folder', click: () => settings.clips_dir && shell.openPath(settings.clips_dir) },
+    ...(app.isPackaged ? [{ label: 'Check for updates', click: () => checkForUpdates(true) }] : []),
     { label: 'Quit Clutch', click: () => { quitting = true; app.quit() } },
   ])
 }
@@ -198,6 +362,21 @@ async function action(kind) {
   }
 }
 
+async function togglePanel() {
+  if (!settings.overlay_enabled) {
+    try {
+      settings = await call('/api/desktop/settings', { method: 'PUT', body: JSON.stringify({ overlay_enabled: true }) })
+    } catch {
+      return
+    }
+    panelShown = true
+  } else {
+    panelShown = !panelShown
+  }
+  refreshTray()
+  refreshPanel()
+}
+
 async function registerHotkeys() {
   try {
     settings = await call('/api/desktop/settings')
@@ -206,15 +385,17 @@ async function registerHotkeys() {
   }
   globalShortcut.unregisterAll()
   const failed = []
-  for (const [key, kind] of [['hotkey_clip', 'clip'], ['hotkey_record', 'record'], ['hotkey_screenshot', 'screenshot']]) {
+  for (const [key, kind] of [['hotkey_clip', 'clip'], ['hotkey_record', 'record'], ['hotkey_screenshot', 'screenshot'], ['hotkey_overlay', 'panel']]) {
     const accel = settings[key]
     if (!accel) continue
     try {
-      if (!globalShortcut.register(accel, () => action(kind))) failed.push(accel)
+      const handler = kind === 'panel' ? () => togglePanel() : () => action(kind)
+      if (!globalShortcut.register(accel, handler)) failed.push(accel)
     } catch {
       failed.push(accel)
     }
   }
+  syncDiscord()
   if (failed.length) flash({ title: 'Hotkey unavailable', sub: `${failed.join(', ')} is taken by another app. Pick another in Settings.`, tone: 'error' })
   refreshTray()
 }
@@ -249,7 +430,12 @@ function onEvent(e) {
   }
   // The in-app toast covers it when Clutch is in front; the overlay is for when you're in game.
   if (!(win && win.isFocused())) flash(overlayFor(e))
-  const note = sessionNotification(e)
+  const note = sessionNotification(e) || eventNotification(e)
+  if (e.type === 'game_started') {
+    panelShown = true
+    setTimeout(refreshPanel, 1500)
+  }
+  if (e.type === 'session_end' || e.type === 'clip_saved') setTimeout(refreshPanel, 500)
   if (note) {
     const n = new Notification({ ...note, icon: path.join(ASSETS, 'icon.png') })
     n.on('click', showWindow)
@@ -271,7 +457,15 @@ function wireIpc() {
     const r = await dialog.showOpenDialog(win, { title: 'Clips folder', properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   })
-  ipcMain.on('clutch:reload-hotkeys', () => void registerHotkeys())
+  ipcMain.on('clutch:reload-hotkeys', () => void registerHotkeys()) // also re-reads overlay + Discord settings
+  ipcMain.on('clutch:app-info', (e) => {
+    e.returnValue = { version: app.getVersion(), packaged: app.isPackaged }
+  })
+  ipcMain.on('clutch:check-updates', () => app.isPackaged && checkForUpdates(true))
+  ipcMain.on('clutch:open-external', (_e, url) => {
+    if (/^https:\/\//.test(String(url))) shell.openExternal(String(url))
+  })
+  ipcMain.on('clutch:copy', (_e, text) => require('electron').clipboard.writeText(String(text).slice(0, 2000)))
   ipcMain.on('clutch:login-item', (_e, open) => app.setLoginItemSettings({ openAtLogin: Boolean(open), args: ['--hidden'] }))
   ipcMain.handle('clutch:displays', () => {
     const primary = screen.getPrimaryDisplay().id
@@ -290,18 +484,63 @@ async function boot() {
   await startBackend()
   createWindow()
   createOverlay()
+  createPanel()
   tray = new Tray(nativeImage.createFromPath(path.join(ASSETS, 'tray.png')))
   tray.on('click', showWindow)
   await registerHotkeys()
   followEvents()
+  setInterval(refreshPanel, 5000)
+  if (app.isPackaged) setTimeout(() => checkForUpdates(false), 15_000)
+}
+
+// ── updates (installed builds only) ────────────────────────────────────────
+
+function checkForUpdates(manual) {
+  let autoUpdater
+  try {
+    ;({ autoUpdater } = require('electron-updater'))
+  } catch {
+    return
+  }
+  autoUpdater.autoDownload = true
+  autoUpdater.once('update-downloaded', (info) => {
+    const n = new Notification({ title: `Clutch ${info.version} is ready`, body: 'Restart Clutch to update. It installs in a few seconds.', icon: path.join(ASSETS, 'icon.png') })
+    n.on('click', () => {
+      quitting = true
+      autoUpdater.quitAndInstall()
+    })
+    n.show()
+  })
+  if (manual) {
+    autoUpdater.once('update-not-available', () => new Notification({ title: 'Clutch is up to date', body: `You're on ${app.getVersion()}.` }).show())
+    autoUpdater.once('error', (err) => new Notification({ title: 'Couldn’t check for updates', body: String(err?.message || err).slice(0, 120) }).show())
+  }
+  autoUpdater.checkForUpdates().catch(() => {})
 }
 
 app.on('before-quit', () => {
   quitting = true
+  if (discord) discord.close()
 })
 
 app.on('will-quit', (e) => {
   globalShortcut.unregisterAll()
+  if (!backend && adopted && backendPid) {
+    // An adopted backend isn't our child: ask it to stop, then make sure.
+    e.preventDefault()
+    const pid = backendPid
+    backendPid = null
+    call('/api/desktop/shutdown', { method: 'POST' }).catch(() => {})
+    setTimeout(() => {
+      try {
+        process.kill(pid)
+      } catch {
+        /* already gone */
+      }
+      app.exit(0)
+    }, 1500)
+    return
+  }
   if (!backend) return
   // Let the backend stop FFmpeg and close sessions cleanly before we exit.
   e.preventDefault()

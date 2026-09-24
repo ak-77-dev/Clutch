@@ -3,7 +3,7 @@ import { BrowserRouter, Link, Route, Routes, useLocation, useParams } from 'reac
 import { api } from './api'
 import { SearchBar } from './components/SearchBar'
 import { DesktopProvider, Rail, Titlebar } from './components/Shell'
-import { GamesContext, useAsync, useGame } from './hooks'
+import { GamesContext, GamesReloadContext, useAsync, useGame } from './hooks'
 import { Home, StatsHub } from './pages/Home'
 
 // Pages that pull in the charting library or heavier UI load on demand.
@@ -12,6 +12,9 @@ const Library = lazy(() => import('./pages/Library').then((m) => ({ default: m.L
 const GameDetail = lazy(() => import('./pages/GameDetail').then((m) => ({ default: m.GameDetail })))
 const Clips = lazy(() => import('./pages/Clips').then((m) => ({ default: m.Clips })))
 const Playtime = lazy(() => import('./pages/Playtime').then((m) => ({ default: m.Playtime })))
+const Sessions = lazy(() => import('./pages/Sessions').then((m) => ({ default: m.Sessions })))
+const Goals = lazy(() => import('./pages/Goals').then((m) => ({ default: m.Goals })))
+const Friends = lazy(() => import('./pages/Friends').then((m) => ({ default: m.Friends })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
 function TopBar() {
@@ -52,6 +55,7 @@ export default function App() {
   if (!games.data) return <div className="content muted mono">Loading…</div>
   return (
     <GamesContext.Provider value={games.data}>
+      <GamesReloadContext.Provider value={games.reload}>
       <BrowserRouter>
         <DesktopProvider>
           <Titlebar />
@@ -63,6 +67,9 @@ export default function App() {
               <Route path="/library/:id" element={<Page><GameDetail /></Page>} />
               <Route path="/clips" element={<Page><Clips /></Page>} />
               <Route path="/playtime" element={<Page><Playtime /></Page>} />
+              <Route path="/sessions" element={<Page><Sessions /></Page>} />
+              <Route path="/goals" element={<Page><Goals /></Page>} />
+              <Route path="/friends" element={<Page><Friends /></Page>} />
               <Route path="/settings" element={<Page><SettingsPage /></Page>} />
               <Route path="/stats" element={<Page><StatsHub /></Page>} />
               <Route path="/:game" element={<Page><StatsHub /></Page>} />
@@ -72,6 +79,7 @@ export default function App() {
           </div>
         </DesktopProvider>
       </BrowserRouter>
+      </GamesReloadContext.Provider>
     </GamesContext.Provider>
   )
 }

@@ -275,7 +275,13 @@ def media_info(path: Path) -> dict[str, Any]:
     """Duration and resolution from FFmpeg's stream banner (no ffprobe in the bundled build)."""
     proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     text = proc.stderr
-    info: dict[str, Any] = {"duration": None, "width": None, "height": None, "has_audio": "Audio:" in text}
+    info: dict[str, Any] = {
+        "duration": None,
+        "width": None,
+        "height": None,
+        "has_audio": "Audio:" in text,
+        "audio_tracks": text.count("Audio:"),
+    }
     if m := re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", text):
         info["duration"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
     if m := re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", text):
@@ -796,6 +802,7 @@ class CaptureConfig:
     audio_device: str = "default"
     mic_device: str = "default"
     audio_kbps: int = 192
+    separate_tracks: bool = False  # with the mic on: add game-only and mic-only tracks after the mix
 
 
 class ReplayBuffer:
@@ -1003,9 +1010,15 @@ class ReplayBuffer:
             if len(wavs) == 1:
                 args += ["-map", "1:a"]
             elif len(wavs) > 1:
-                # Game audio and mic mixed into one track (players share clips; nobody wants to pick tracks).
+                # Game audio and mic mixed into the first (default) track: players share clips and
+                # nobody wants to pick tracks. With separate tracks on, game-only and mic-only follow,
+                # the same layout OBS uses, so editors (and "export without mic") can split them.
                 mix = "".join(f"[{i + 1}:a]" for i in range(len(wavs)))
                 args += ["-filter_complex", f"{mix}amix=inputs={len(wavs)}:duration=first:normalize=0[a]", "-map", "[a]"]
+                if self.cfg.separate_tracks:
+                    names = ["Game + mic", *(("Game" if t.name == "system" else "Mic") for t in tracks)]
+                    args += [a for i in range(len(wavs)) for a in ("-map", f"{i + 1}:a")]
+                    args += [a for i, n in enumerate(names) for a in (f"-metadata:s:a:{i}", f"title={n}")]
             if wavs:
                 args += ["-c:a", "aac", "-b:a", f"{self.cfg.audio_kbps}k"]
             if self.codec == "hevc":

@@ -17,7 +17,7 @@ export function Music() {
 
 const LOGO: Record<MusicApp['key'], string> = { spotify: 'SP', applemusic: 'AM', ytmusic: 'YT' }
 
-function Volume({ s, onChange }: { s: MediaSession; onChange: (patch: { level?: number; muted?: boolean }) => void }) {
+function Volume({ s, onChange }: { s: MediaSession; onChange: (patch: { level?: number; muted?: boolean }) => Promise<void> }) {
   const [draft, setDraft] = useState<number | null>(null)
   const timer = useRef<number | undefined>(undefined)
   if (!s.volume) return null
@@ -38,8 +38,8 @@ function Volume({ s, onChange }: { s: MediaSession; onChange: (patch: { level?: 
           setDraft(v)
           window.clearTimeout(timer.current)
           timer.current = window.setTimeout(() => {
-            onChange({ level: v / 100 })
-            setDraft(null)
+            // keep showing the new level until the mixer confirms it (no snap back)
+            void onChange({ level: v / 100 }).finally(() => setDraft((d) => (d === v ? null : d)))
           }, 120)
         }}
       />
@@ -129,7 +129,7 @@ function MusicInner() {
                   <SeekBar s={s} at={state!.at} run={run} />
                   <div className="np-controls">
                     <Transport s={s} run={run} big />
-                    <Volume s={s} onChange={(p) => void volume(s, p)} />
+                    <Volume s={s} onChange={(p) => volume(s, p)} />
                   </div>
                 </div>
               </div>

@@ -150,3 +150,63 @@ def test_unavailable_state_explains_why(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "winrt.windows.media.control", None)
     m.start()
     assert m.state()["error"].startswith("media controls unavailable")
+
+
+class ScriptedBackend:
+    """Replays a list of snapshots, one per refresh, and serves artwork per title."""
+
+    def __init__(self, frames, art):
+        self.frames, self.art, self.i = frames, art, 0
+
+    async def snapshot(self):
+        frame = self.frames[min(self.i, len(self.frames) - 1)]
+        self.i += 1
+        return (frame[0]["id"] if frame else None), [dict(s) for s in frame]
+
+    async def thumbnail(self, session_id):
+        return self.art(self.i), "image/png"
+
+
+def _yt(title, status="playing"):
+    return {"id": YT, "title": title, "artist": "Sleep Theory", "album": "Paper Hearts", "status": status, "position": 1.0, "duration": 200.0,
+            "can": {"play_pause": True}, "shuffle": None, "repeat": None, "has_art": True}  # fmt: skip
+
+
+def test_track_changes_dont_flicker_the_player(monkeypatch):
+    import asyncio
+
+    frames = [[_yt("Enough")], [], [{**_yt(""), "has_art": False}], [_yt("Another Way")]]
+    m = MediaService(None, backend=ScriptedBackend(frames, lambda i: b"art-" + str(i).encode()))
+    titles = [[s["title"] for s in asyncio.run(m._refresh())["sessions"]] for _ in frames]
+    # The session vanished and then came back untitled for a moment; the player kept showing the last track.
+    assert titles == [["Enough"], ["Enough"], ["Enough"], ["Another Way"]]
+
+    clock = [1000.0]
+    monkeypatch.setattr("clutch.local.media.time.time", lambda: clock[0])
+    m2 = MediaService(None, backend=ScriptedBackend([[_yt("Enough")], []], lambda i: b"x"))
+    asyncio.run(m2._refresh())
+    clock[0] += m2.GRACE_S + 0.1
+    assert asyncio.run(m2._refresh())["sessions"] == [], "a session that's really gone disappears after the grace period"
+
+
+def test_old_artwork_under_a_new_title_is_re_read():
+    import asyncio
+
+    frames = [[_yt("Enough")]] + [[_yt("Another Way")]] * 6
+    # The app keeps serving the old image for two more polls, then the new one.
+    m = MediaService(None, backend=ScriptedBackend(frames, lambda i: b"old" if i <= 3 else b"new"))
+    first = asyncio.run(m._refresh())["sessions"][0]["art"]
+    shown = [asyncio.run(m._refresh())["sessions"][0]["art"] for _ in range(3)]
+    new_key = art_key(YT, "Another Way", "Sleep Theory")
+    assert shown[0] == first and shown[1] == first, "keeps the previous image while the app catches up"
+    assert shown[2] == new_key and m.art(new_key)[0] == b"new"
+
+
+def test_same_album_art_is_accepted_after_a_few_looks():
+    import asyncio
+
+    frames = [[_yt("Enough")]] + [[_yt("Another Way")]] * 8
+    m = MediaService(None, backend=ScriptedBackend(frames, lambda i: b"album-cover"))
+    asyncio.run(m._refresh())
+    keys = [asyncio.run(m._refresh())["sessions"][0]["art"] for _ in range(m.ART_RETRIES + 1)]
+    assert keys[-1] == art_key(YT, "Another Way", "Sleep Theory")  # tracks from one album really do share art

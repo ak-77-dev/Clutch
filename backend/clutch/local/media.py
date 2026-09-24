@@ -352,10 +352,32 @@ class SmtcBackend:
         raise ValueError(f"action must be one of {', '.join(ACTIONS)}")
 
 
+def _expectation(action: str, value: Any, before: dict[str, Any] | None) -> Any:
+    """What a session looks like once ``action`` has taken effect."""
+    was = before or {}
+    return {
+        "play_pause": lambda s: s["status"] != was.get("status"),
+        "play": lambda s: s["status"] == "playing",
+        "pause": lambda s: s["status"] != "playing",
+        "next": lambda s: (s["title"], s["artist"]) != (was.get("title"), was.get("artist")),
+        "previous": lambda s: (s["title"], s["artist"]) != (was.get("title"), was.get("artist")) or s["position"] < 3,
+        "seek": lambda s: abs(s["position"] - float(value)) < 3,
+        "shuffle": lambda s: s["shuffle"] == bool(value),
+        "repeat": lambda s: s["repeat"] == value,
+    }[action]
+
+
 class MediaService:
     """Keeps a snapshot of the media sessions, publishes changes, runs commands."""
 
     POLL_S = 1.0
+    # While an app switches tracks its session can vanish, or report no title, for a
+    # moment (YouTube Music does, for ~0.5 s). Showing that makes the player flicker, so
+    # a session that was there a moment ago is held for this long.
+    GRACE_S = 3.0
+    # Apps can update the title before the artwork: artwork identical to the previous
+    # track's is re-read a few times before it's believed.
+    ART_RETRIES = 4
 
     def __init__(self, events: Any = None, *, backend: Any = None, mixer: Mixer | None = None) -> None:
         self.events = events
@@ -368,6 +390,9 @@ class MediaService:
         self._state: dict[str, Any] = {"available": False, "current": None, "sessions": [], "at": time.time()}
         self._sig: Any = None
         self._art: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
+        self._held: dict[str, tuple[dict[str, Any], float]] = {}  # session id -> (last good session, seen at)
+        self._last_art: dict[str, tuple[str, str]] = {}  # session id -> (art key, digest) of its last track
+        self._art_tries: dict[str, int] = {}
         self._ducked: dict[tuple[str, ...], float] = {}
         self.error: str | None = None
 
@@ -427,31 +452,66 @@ class MediaService:
                 await self._refresh()
 
     # ── snapshot ────────────────────────────────────────────────────────────
+    async def _art_for(self, s: dict[str, Any]) -> str | None:
+        """The artwork key to show for a session, reading (and caching) its thumbnail when needed."""
+        if not s.get("has_art"):
+            return None
+        key = art_key(s["id"], s["title"], s["artist"])
+        if key in self._art:
+            return key
+        try:
+            art = await self._backend.thumbnail(s["id"])
+        except Exception:
+            art = None
+        if not art:
+            return None
+        digest = hashlib.sha1(art[0]).hexdigest()
+        prev_key, prev_digest = self._last_art.get(s["id"], (None, None))
+        if prev_key and prev_key != key and digest == prev_digest and self._art_tries.get(key, 0) < self.ART_RETRIES:
+            # Probably the old track's image still: keep showing it and look again next poll.
+            self._art_tries[key] = self._art_tries.get(key, 0) + 1
+            return prev_key if prev_key in self._art else None
+        self._art[key] = art
+        self._art_tries.pop(key, None)
+        self._last_art[s["id"]] = (key, digest)
+        while len(self._art) > 40:
+            self._art.popitem(last=False)
+        return key
+
     async def _refresh(self) -> dict[str, Any]:
         current, raw = await self._backend.snapshot()
+        now = time.time()
         sessions = []
+        seen = set()
         for s in raw:
+            held = self._held.get(s["id"])
+            if not s["title"] and held and now - held[1] < self.GRACE_S:
+                sessions.append(held[0])  # mid track change: keep showing the last track
+                seen.add(s["id"])
+                continue
             app, name = identify(s["id"])
             procs = processes_for(s["id"])
-            key = art_key(s["id"], s["title"], s["artist"]) if s.get("has_art") else None
-            if key and key not in self._art:
-                with contextlib.suppress(Exception):
-                    art = await self._backend.thumbnail(s["id"])
-                    if art:
-                        self._art[key] = art
-                        while len(self._art) > 40:
-                            self._art.popitem(last=False)
+            key = await self._art_for(s)
             volume = self.mixer.read(procs) if self.mixer else None
-            sessions.append(
-                {
-                    **{k: v for k, v in s.items() if k != "has_art"},
-                    "app": app,
-                    "app_name": name,
-                    "art": key if key in self._art else None,
-                    "volume": volume,
-                    "volume_scope": "browser" if app in ("ytmusic", "browser") else "app",
-                }
-            )
+            session = {
+                **{k: v for k, v in s.items() if k != "has_art"},
+                "app": app,
+                "app_name": name,
+                "art": key,
+                "volume": volume,
+                "volume_scope": "browser" if app in ("ytmusic", "browser") else "app",
+            }
+            sessions.append(session)
+            seen.add(s["id"])
+            if s["title"]:
+                self._held[s["id"]] = (session, now)
+        for sid, (session, at) in list(self._held.items()):
+            if sid in seen:
+                continue
+            if now - at < self.GRACE_S:
+                sessions.append(session)  # vanished for a moment (track change): hold it
+            else:
+                del self._held[sid]
         # Playing sessions first, then music apps, so "the" session is the one you'd expect.
         sessions.sort(key=lambda x: (x["status"] != "playing", x["app"] not in MUSIC_APPS, x["id"] != current))
         state = {"available": True, "current": current, "sessions": sessions, "at": time.time()}
@@ -503,14 +563,24 @@ class MediaService:
         if action == "repeat" and value not in ("none", "track", "list"):
             raise ValueError("repeat must be none, track or list")
         self._require()
-        target = session or (self.now_playing() or {}).get("id")
+        before = next((x for x in self._state["sessions"] if x["id"] == session), None) if session else self.now_playing()
+        target = session or (before or {}).get("id")
         ok = self._call(self._backend.control(target, action, value))
+        done = _expectation(action, value, before)
 
         async def settle() -> dict[str, Any]:
-            await asyncio.sleep(0.35)  # let the app update its session before we read it back
-            return await self._refresh()
+            # Apps take 0.1-1 s to reflect a command. Answer as soon as the change shows,
+            # so the UI never flashes back to the old state.
+            state = self._state
+            for _ in range(10):
+                await asyncio.sleep(0.15)
+                state = await self._refresh()
+                now = next((x for x in state["sessions"] if x["id"] == target), None)
+                if now is not None and done(now):
+                    break
+            return state
 
-        state = self._call(settle())
+        state = self._call(settle(), timeout=6)
         return {"ok": ok, **state}
 
     def set_volume(self, session: str, level: float | None = None, muted: bool | None = None) -> dict[str, Any]:

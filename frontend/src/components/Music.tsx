@@ -18,6 +18,8 @@ export function useMedia() {
   })
   const run = useCallback(
     async (action: MediaAction, session?: string | null, value?: unknown) => {
+      // Flip play / pause right away; the backend answers once the app has actually changed.
+      if (action === 'play_pause' || action === 'play' || action === 'pause') setState((st) => (st ? optimistic(st, action, session) : st))
       try {
         setState(await desktop.mediaCommand(action, session, value))
       } catch (e) {
@@ -27,6 +29,21 @@ export function useMedia() {
     [toast],
   )
   return { state, setState, run }
+}
+
+function optimistic(st: MediaState, action: MediaAction, session?: string | null): MediaState {
+  const target = session ?? st.sessions.find((x) => x.title)?.id
+  const now = Date.now() / 1000
+  return {
+    ...st,
+    at: now,
+    sessions: st.sessions.map((s) => {
+      if (s.id !== target) return s
+      const playing = action === 'play' || (action === 'play_pause' && s.status !== 'playing')
+      const position = s.status === 'playing' ? Math.min(s.duration || Infinity, s.position + Math.max(0, now - st.at)) : s.position
+      return { ...s, status: playing ? 'playing' : 'paused', position }
+    }),
+  }
 }
 
 /** Where the track is now: sessions report a position as of the last update, so playing ones tick forward. */
@@ -95,7 +112,15 @@ export function SeekBar({ s, at, run }: { s: MediaSession; at: number; run: (a: 
   const pos = usePosition(s, at)
   const bar = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<number | null>(null)
-  const shown = drag ?? pos
+  // After a seek, hold the new spot until the app reports it (instead of snapping back for a moment).
+  const [pending, setPending] = useState<{ to: number; at: number } | null>(null)
+  const pendingNow = pending ? pending.to + (s.status === 'playing' ? Date.now() / 1000 - pending.at : 0) : null
+  useEffect(() => {
+    if (!pending) return
+    if (Math.abs(pos - pending.to) < 2.5 || Date.now() / 1000 - pending.at > 3) setPending(null)
+  }, [pos, pending])
+  useEffect(() => setPending(null), [s.id, s.title])
+  const shown = drag ?? pendingNow ?? pos
   const pct = s.duration ? (shown / s.duration) * 100 : 0
 
   function at_(x: number) {
@@ -113,6 +138,7 @@ export function SeekBar({ s, at, run }: { s: MediaSession; at: number; run: (a: 
       window.removeEventListener('pointerup', up)
       const to = at_(ev.clientX)
       setDrag(null)
+      setPending({ to, at: Date.now() / 1000 })
       run('seek', s.id, Math.round(to * 10) / 10)
     }
     window.addEventListener('pointermove', move)
@@ -156,7 +182,8 @@ export function MiniPlayer() {
       </Link>
       <Transport s={s} run={run} />
       <div className="mp-progress">
-        <i style={{ width: `${s.duration ? (pos / s.duration) * 100 : 0}%` }} />
+        {/* keyed by track, so a new song starts at 0 instead of sliding back from the old position */}
+        <i key={`${s.id}|${s.title}`} style={{ width: `${s.duration ? (pos / s.duration) * 100 : 0}%` }} />
       </div>
     </div>
   )

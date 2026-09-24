@@ -107,10 +107,12 @@ function MusicInner() {
 
       <div className="grid cols-2-1">
         <div className="stack">
-          {state && !state.available ? (
+          {!state || (!state.available && !state.error) ? (
+            <div className="skeleton" style={{ height: 290 }} aria-label="Connecting to Windows media controls" />
+          ) : !state.available ? (
             <div className="card empty">
               <span className="display">Music controls unavailable</span>
-              They need Windows 10 or 11.
+              {state.error}
             </div>
           ) : s ? (
             <section className={`now-playing ${s.status === 'playing' ? 'playing' : ''}`} style={{ '--app': appAccent(s.app) } as React.CSSProperties}>

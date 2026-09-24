@@ -477,7 +477,7 @@ class MediaService:
         return state
 
     def state(self) -> dict[str, Any]:
-        return self._state
+        return self._state if self._state["available"] else {**self._state, "error": self.error}
 
     def now_playing(self) -> dict[str, Any] | None:
         """The session to show in compact places (overlay, rail): playing first, else paused."""

@@ -222,8 +222,9 @@ def test_montage_caption_vertical(tmp_path, clips):
     with pytest.raises(ValueError):
         edit.montage([{"path": str(clips["a"])}], tmp_path / "x.mp4")
 
-    cap = edit.caption(clips["a"], tmp_path / "c.mp4", 'GG: "clutch" 1v4', encoder="x264")
-    assert media_info(cap)["duration"] == pytest.approx(2, abs=0.2)
+    if edit.has_filter("drawtext"):  # the Windows FFmpeg has it; imageio-ffmpeg's Linux build doesn't
+        cap = edit.caption(clips["a"], tmp_path / "c.mp4", 'GG: "clutch" 1v4', encoder="x264")
+        assert media_info(cap)["duration"] == pytest.approx(2, abs=0.2)
     with pytest.raises(ValueError):
         edit.caption(clips["a"], tmp_path / "c2.mp4", "   ")
 

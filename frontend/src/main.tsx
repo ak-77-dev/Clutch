@@ -13,9 +13,6 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles.css'
 import './fx.css'
-import { installFx } from './fx'
-
-installFx()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

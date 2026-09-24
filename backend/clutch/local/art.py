@@ -23,6 +23,7 @@ from clutch.local.library import Game
 
 STEAM_CDN = "https://cdn.cloudflare.steamstatic.com/steam/apps"
 STORE_SEARCH = "https://store.steampowered.com/api/storesearch/"
+SGDB = "https://www.steamgriddb.com/api/v2"
 # Edition words launchers append that Steam listings don't have.
 NAME_SUFFIXES = re.compile(r"\s+(pc|enhanced|enhanced edition|windows 10|for windows|game)$", re.I)
 
@@ -45,7 +46,8 @@ def art_urls(appid: int | None) -> dict[str, str | None]:
 
 
 class ArtResolver:
-    def __init__(self, cache_dir: Path, session: requests.Session | None = None) -> None:
+    def __init__(self, cache_dir: Path, session: requests.Session | None = None, sgdb_key: Any = None) -> None:
+        self.sgdb_key = sgdb_key or (lambda: "")  # callable: the key can be added later in Settings
         self.cache_dir = cache_dir
         self.icons = cache_dir / "icons"
         self.icons.mkdir(parents=True, exist_ok=True)
@@ -126,6 +128,46 @@ class ArtResolver:
             self._save()
         return color
 
+    # ── SteamGridDB (optional, for games Steam doesn't sell) ─────────────────
+    def sgdb(self, game: Game, resolve: bool = True) -> dict[str, str | None] | None:
+        key = f"sgdb:{normalize(game.name)}"
+        if key in self.index or not resolve:
+            return self.index.get(key)
+        api_key = self.sgdb_key()
+        if not api_key:
+            return None
+        found = self._sgdb_lookup(game.name, api_key)
+        if found is None:
+            return None  # network trouble: try again next time instead of caching a miss
+        with self._lock:
+            self.index[key] = found
+            self._save()
+        return found
+
+    def _sgdb_lookup(self, name: str, api_key: str) -> dict[str, str | None] | None:
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+        def get(path: str, **params: Any) -> Any:
+            resp = self.session.get(f"{SGDB}{path}", headers=headers, params=params, timeout=8)
+            resp.raise_for_status()
+            return resp.json().get("data") or []
+
+        try:
+            hits = get(f"/search/autocomplete/{requests.utils.quote(NAME_SUFFIXES.sub('', name))}")
+            match = next(
+                (h for h in hits if normalize(h.get("name", "")) in {normalize(name), normalize(NAME_SUFFIXES.sub("", name))}), None
+            )
+            if match is None:
+                return {"cover": None, "hero": None, "logo": None}
+            gid = match["id"]
+            grids = get(f"/grids/game/{gid}", dimensions="600x900", types="static")
+            heroes = get(f"/heroes/game/{gid}", types="static")
+            logos = get(f"/logos/game/{gid}", types="static")
+        except (requests.RequestException, ValueError, KeyError):
+            return None
+        first = lambda rows: rows[0]["url"] if rows else None  # noqa: E731
+        return {"cover": first(grids), "hero": first(heroes), "logo": first(logos)}
+
     def describe(self, game: Game, resolve: bool = True) -> dict[str, Any]:
         """Art URLs and accent colour. ``resolve=False`` only uses what's cached (no network, no disk work)."""
         if resolve:
@@ -133,7 +175,10 @@ class ArtResolver:
         else:
             appid = game.steam_appid or self.index.get(f"appid:{normalize(game.name)}")
             accent = self.index.get(f"accent:{game.id}")
-        return {**art_urls(appid), "steam_appid": appid, "accent": accent}
+        urls = {**art_urls(appid), "steam_appid": appid, "accent": accent}
+        if not appid and (extra := self.sgdb(game, resolve)):
+            urls.update({k: v for k, v in extra.items() if v})
+        return urls
 
 
 def dominant_color(path: Path) -> str | None:

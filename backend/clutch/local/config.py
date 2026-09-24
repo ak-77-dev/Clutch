@@ -58,6 +58,19 @@ class Settings:
     auto_sync_on_exit: bool = True  # refresh linked stats when a tracked game closes
     # game id -> player key, so "my stats" and auto-sync know who you are
     linked_profiles: dict[str, str] = field(default_factory=dict)
+    onboarded: bool = False  # the first-run setup has been completed
+    # Storage: clips older than N days / beyond N GB go to the Recycle Bin (favorites are kept). 0 = off.
+    storage_max_days: int = 0
+    storage_max_gb: int = 0
+    separate_audio_tracks: bool = False  # with the mic on: extra game-only and mic-only tracks
+    auto_clip: bool = True  # save highlights on kills/multikills in games that report them
+    auto_clip_min: str = "multikill"  # kill | multikill | ace: the smallest event worth a clip
+    overlay_enabled: bool = False  # in-game session panel
+    hotkey_overlay: str = "Alt+O"
+    discord_rpc: bool = False
+    discord_client_id: str = ""  # your Discord application's ID (discord.com/developers)
+    steamgriddb_key: str = ""  # free key from steamgriddb.com/profile/preferences/api
+    share_host: str = "catbox"  # catbox (permanent) | litterbox (expires after 72 h)
 
     def __post_init__(self) -> None:
         if not self.clips_dir:
@@ -73,6 +86,8 @@ CHOICES = {
     "resolution": ("native", "1440", "1080", "720"),
     "fps": (30, 60, 120, 144),
     "audio_kbps": (128, 192, 256, 320),
+    "auto_clip_min": ("kill", "multikill", "ace"),
+    "share_host": ("catbox", "litterbox"),
 }
 
 
@@ -114,6 +129,8 @@ class SettingsStore:
                     raise ValueError(f"{key} must be one of {', '.join(map(str, allowed))}")
             if not 5 <= data["bitrate_mbps"] <= 150:
                 raise ValueError("bitrate_mbps must be between 5 and 150")
+            if data["storage_max_days"] < 0 or data["storage_max_gb"] < 0:
+                raise ValueError("storage limits can't be negative")
             self.settings = Settings(**data)
             self.path.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
         for fn in self._listeners:

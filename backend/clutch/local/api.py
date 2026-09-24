@@ -70,6 +70,32 @@ class SaveClip(BaseModel):
     seconds: float | None = None
 
 
+class Montage(BaseModel):
+    clip_ids: list[int]
+    title: str | None = None
+
+
+class Caption(BaseModel):
+    text: str
+    position: str = "bottom"
+
+
+class Vertical(BaseModel):
+    mode: str = "blur"
+
+
+class GoalIn(BaseModel):
+    kind: str
+    target: float
+    game_id: str | None = None
+    label: str | None = None
+
+
+class FriendIn(BaseModel):
+    game: str
+    query: str
+
+
 def _bad(exc: Exception, code: int = 400) -> HTTPException:
     return HTTPException(status_code=code, detail={"error": "DESKTOP", "message": str(exc)})
 
@@ -296,6 +322,124 @@ def router(desktop: Desktop) -> APIRouter:
         if sys.platform == "win32":  # pragma: no cover - opens Explorer
             subprocess.Popen(["explorer", "/select,", os.path.normpath(c["path"])])
         return {"ok": True}
+
+    # ── editing & sharing ───────────────────────────────────────────────────
+    def _edit(fn, *args):
+        try:
+            return fn(*args)
+        except KeyError:
+            raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "No such clip"}) from None
+        except (ValueError, RuntimeError) as exc:
+            raise _bad(exc) from None
+
+    @r.post("/clips/montage")
+    def montage(body: Montage) -> dict[str, Any]:
+        return _edit(desktop.make_montage, body.clip_ids, body.title)
+
+    @r.post("/clips/{clip_id}/caption")
+    def caption(clip_id: int, body: Caption) -> dict[str, Any]:
+        return _edit(desktop.make_caption, clip_id, body.text, body.position)
+
+    @r.post("/clips/{clip_id}/vertical")
+    def vertical(clip_id: int, body: Vertical) -> dict[str, Any]:
+        return _edit(desktop.make_vertical, clip_id, body.mode)
+
+    @r.post("/clips/{clip_id}/without-mic")
+    def without_mic(clip_id: int) -> dict[str, Any]:
+        return _edit(desktop.make_without_mic, clip_id)
+
+    @r.post("/clips/{clip_id}/share")
+    def share_clip(clip_id: int) -> dict[str, Any]:
+        from clutch.local.share import ShareError
+
+        try:
+            return desktop.share_clip(clip_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "No such clip"}) from None
+        except ShareError as exc:
+            raise _bad(exc, 502) from None
+
+    @r.get("/clips/{clip_id}/match")
+    def clip_match(clip_id: int) -> dict[str, Any]:
+        _clip(clip_id)
+        return {"match": desktop.clip_match(clip_id)}
+
+    @r.get("/matches/{game}/{key}/clips")
+    def match_clips(game: str, key: str) -> dict[str, list[int]]:
+        return desktop.match_clips(game, key)
+
+    # ── storage ─────────────────────────────────────────────────────────────
+    @r.get("/storage")
+    def storage(max_days: int | None = None, max_gb: float | None = None) -> dict[str, Any]:
+        return {**desktop.clips.stats(), "plan": desktop.storage_plan(max_days, max_gb)}
+
+    @r.post("/storage/clean")
+    def storage_clean() -> dict[str, Any]:
+        return desktop.enforce_storage() or {"count": 0, "bytes": 0}
+
+    # ── reports, goals, friends, session ────────────────────────────────────
+    @r.get("/reports")
+    def reports(limit: int = Query(20, ge=1, le=200)) -> list[dict[str, Any]]:
+        return desktop.reports.recent(limit)
+
+    @r.get("/reports/{report_id}")
+    def report(report_id: int) -> dict[str, Any]:
+        try:
+            return desktop.reports.get(report_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "No such report"}) from None
+
+    @r.get("/goals")
+    def goals() -> list[dict[str, Any]]:
+        return desktop.goals_view()
+
+    @r.post("/goals")
+    def add_goal(body: GoalIn) -> dict[str, Any]:
+        try:
+            return desktop.goals.add(body.kind, body.target, body.game_id, body.label)
+        except ValueError as exc:
+            raise _bad(exc) from None
+
+    @r.delete("/goals/{goal_id}")
+    def delete_goal(goal_id: int) -> dict[str, Any]:
+        desktop.goals.delete(goal_id)
+        return {"ok": True}
+
+    @r.get("/friends")
+    def friends() -> dict[str, Any]:
+        return desktop.friends_view()
+
+    @r.post("/friends")
+    def add_friend(body: FriendIn) -> dict[str, Any]:
+        try:
+            return desktop.add_friend(body.game, body.query)
+        except Exception as exc:
+            raise _bad(exc, 404) from None
+
+    @r.delete("/friends/{game}/{key}")
+    def remove_friend(game: str, key: str) -> dict[str, Any]:
+        desktop.friends.remove(game, key)
+        return {"ok": True}
+
+    @r.post("/friends/refresh")
+    def refresh_friends() -> dict[str, Any]:
+        return {"refreshed": desktop.refresh_friends(force=True)}
+
+    @r.get("/session")
+    def session() -> dict[str, Any]:
+        return desktop.session_view()
+
+    # ── auto-clip ───────────────────────────────────────────────────────────
+    @r.get("/autoclip")
+    def autoclip() -> list[dict[str, Any]]:
+        return desktop.autoclip_games()
+
+    @r.post("/autoclip/{game_id}/install")
+    def install_autoclip(game_id: str) -> dict[str, Any]:
+        try:
+            return {"path": desktop.install_autoclip(game_id)}
+        except (KeyError, ValueError) as exc:
+            raise _bad(exc) from None
 
     @r.post("/clips/import")
     def import_clips() -> dict[str, Any]:

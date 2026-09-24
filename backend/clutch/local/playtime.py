@@ -159,7 +159,14 @@ class PlaytimeTracker:
             self.db.commit()
             return
         self.db.commit()
-        info = {"game_id": gid, "game_name": run.game.name, "started_at": run.started_at, "ended_at": now, "seconds": duration}
+        info = {
+            "id": run.session_id,
+            "game_id": gid,
+            "game_name": run.game.name,
+            "started_at": run.started_at,
+            "ended_at": now,
+            "seconds": duration,
+        }
         for fn in self.on_stop:
             _safe(fn, run.game, info)
 

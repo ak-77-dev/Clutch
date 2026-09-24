@@ -8,6 +8,7 @@ with titles, favourites, game, duration and a thumbnail, and does the editing
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sqlite3
 import threading
@@ -56,6 +57,7 @@ COLUMNS = (
     "favorite",
     "thumb",
     "parent_id",
+    "share_url",
 )
 
 
@@ -67,6 +69,8 @@ class ClipStore:
     def __init__(self, db_path: Path | str, thumbs_dir: Path) -> None:
         self.db = sqlite3.connect(str(db_path), check_same_thread=False)
         self.db.executescript(SCHEMA)
+        with contextlib.suppress(sqlite3.OperationalError):  # added after the first release
+            self.db.execute("ALTER TABLE clips ADD COLUMN share_url TEXT")
         self.thumbs = thumbs_dir
         self.thumbs.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -75,7 +79,7 @@ class ClipStore:
     @staticmethod
     def new_path(root: Path, game_name: str | None, kind: str, ext: str = ".mp4") -> Path:
         stamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        label = {"clip": "Clip", "recording": "Recording", "screenshot": "Screenshot"}.get(kind, kind.title())
+        label = {"clip": "Clip", "recording": "Recording", "screenshot": "Screenshot", "montage": "Montage"}.get(kind, kind.title())
         folder = root / safe_name(game_name or "Desktop")
         path = folder / f"{safe_name(game_name or 'Desktop')} {label} {stamp}{ext}"
         n = 2
@@ -187,6 +191,12 @@ class ClipStore:
                 self.db.execute("UPDATE clips SET title = ? WHERE id = ?", (title.strip()[:120] or "Untitled", clip_id))
             if favorite is not None:
                 self.db.execute("UPDATE clips SET favorite = ? WHERE id = ?", (int(favorite), clip_id))
+            self.db.commit()
+        return self.get(clip_id)
+
+    def set_share_url(self, clip_id: int, url: str) -> dict[str, Any]:
+        with self._lock:
+            self.db.execute("UPDATE clips SET share_url = ? WHERE id = ?", (url, clip_id))
             self.db.commit()
         return self.get(clip_id)
 

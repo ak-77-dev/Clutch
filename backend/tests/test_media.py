@@ -142,3 +142,11 @@ def test_unavailable_without_a_backend(monkeypatch):
     assert m.start() is False and m.state()["available"] is False
     with pytest.raises(RuntimeError):
         m.command("next")
+
+
+def test_unavailable_state_explains_why(monkeypatch):
+    m = MediaService(None, backend=None)
+    assert "error" in m.state() and m.state()["error"] is None  # still starting: no reason yet
+    monkeypatch.setitem(__import__("sys").modules, "winrt.windows.media.control", None)
+    m.start()
+    assert m.state()["error"].startswith("media controls unavailable")

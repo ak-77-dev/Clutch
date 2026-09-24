@@ -243,6 +243,7 @@ export interface MediaSession {
 
 export interface MediaState {
   available: boolean
+  error?: string | null // why it's unavailable (none while it's still starting)
   current: string | null
   sessions: MediaSession[]
   at: number

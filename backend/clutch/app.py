@@ -17,7 +17,12 @@ from clutch.http import ApiError, AuthFailed, NotFound
 from clutch.service import Clutch, NotConfigured, UnknownGame
 from clutch.store import Store
 
-DEFAULT_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+# The built frontend: next to the repo in development, or wherever an installed build put it.
+DEFAULT_DIST = (
+    Path(os.environ["CLUTCH_STATIC_DIR"])
+    if os.environ.get("CLUTCH_STATIC_DIR")
+    else Path(__file__).resolve().parents[2] / "frontend" / "dist"
+)
 
 
 def create_app(service: Clutch | None = None, *, static_dir: Path | None = DEFAULT_DIST, desktop: Any = None) -> FastAPI:
@@ -72,7 +77,7 @@ def create_app(service: Clutch | None = None, *, static_dir: Path | None = DEFAU
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True, "version": __version__, "desktop": desktop is not None}
+        return {"ok": True, "version": __version__, "desktop": desktop is not None, "pid": os.getpid()}
 
     @app.get("/api/games")
     def games() -> list[dict]:

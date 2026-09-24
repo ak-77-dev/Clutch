@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { ApiError } from './api'
+import type { MatchSummary } from './types'
 
 export interface DesktopBridge {
   token: string
@@ -17,6 +18,10 @@ export interface DesktopBridge {
   reloadHotkeys: () => void
   setLoginItem: (open: boolean) => void
   displays: () => Promise<{ id: number; label: string; primary: boolean; width: number; height: number }[]>
+  openExternal?: (url: string) => void
+  copy?: (text: string) => void
+  packaged?: boolean
+  checkUpdates?: () => void
 }
 
 declare global {
@@ -137,6 +142,7 @@ export interface Clip {
   thumb: string | null
   parent_id: number | null
   exists: boolean
+  share_url?: string | null
 }
 
 export interface PlaytimeGame {
@@ -198,6 +204,129 @@ export interface Settings {
   notify_sessions: boolean
   auto_sync_on_exit: boolean
   linked_profiles: Record<string, string>
+  onboarded: boolean
+  storage_max_days: number
+  storage_max_gb: number
+  separate_audio_tracks: boolean
+  auto_clip: boolean
+  auto_clip_min: 'kill' | 'multikill' | 'ace'
+  overlay_enabled: boolean
+  hotkey_overlay: string
+  discord_rpc: boolean
+  discord_client_id: string
+  steamgriddb_key: string
+  share_host: 'catbox' | 'litterbox'
+}
+
+export interface ReportStats {
+  games: number
+  wins: number
+  losses: number
+  metric: { key: string; label: string; fmt: string; session: number | null; usual: number | null }
+  best: { id: string; character: string; value: number; result: string; score_line: string } | null
+  rank: string | null
+}
+
+export interface Report {
+  id: number
+  session_id: number | null
+  game_id: string
+  game_name: string
+  started_at: number
+  ended_at: number
+  seconds: number
+  clips: number[]
+  stats: ReportStats | null
+  stats_game: string | null
+}
+
+export type GoalKind = 'daily_cap' | 'weekly_hours' | 'clips' | 'win_rate' | 'rank'
+
+export interface GoalProgress {
+  value: number | null
+  target: number
+  unit: string
+  progress: number
+  state: 'ok' | 'close' | 'over' | 'done' | 'unlinked' | 'unranked'
+  current?: string | null
+}
+
+export interface Goal {
+  id: number
+  kind: GoalKind
+  game_id: string | null
+  target: number
+  label: string | null
+  created_at: number
+  done_at: number | null
+  notified: string | null
+  progress: GoalProgress
+}
+
+export interface FriendCard {
+  game: string
+  key: string
+  name: string
+  added_at: number
+  synced_at: number
+  tag?: string | null
+  icon?: string | null
+  rank?: string | null
+  last_played?: string | null
+  wins?: number
+  losses?: number
+  demo?: boolean
+  error?: boolean
+}
+
+export interface FriendItem extends MatchSummary {
+  friend: string
+  friend_key: string
+  icon: string | null
+}
+
+export interface SessionView {
+  playing: NowPlaying | null
+  today_seconds: number
+  buffer: BufferStatus
+  session_clips?: number
+  today?: { wins: number; losses: number }
+  rank?: string | null
+  daily_cap?: GoalProgress
+}
+
+export interface AutoClipGame {
+  game_id: string
+  name: string
+  method: string
+  needs_install: boolean
+  installed: boolean
+}
+
+export interface StorageInfo {
+  count: number
+  bytes: number
+  seconds: number
+  by_kind: Record<string, number>
+  plan: { count: number; bytes: number; clip_ids: number[]; reasons: Record<string, string> }
+}
+
+export interface ApiKeys {
+  path: string
+  keys: { name: string; game: string; label: string; help: string; set: boolean; preview: string }[]
+  lol_platform: string
+}
+
+export interface ClipMatch {
+  game: string
+  key: string
+  id: string
+  date: string
+  result: string
+  character: string
+  score_line: string
+  map: string | null
+  mode: string
 }
 
 export interface Capabilities {
@@ -216,6 +345,10 @@ export type DesktopEvent =
   | { type: 'launching'; at: number; game_id: string; game_name: string }
   | { type: 'stats_synced'; at: number; game: string; key: string; new: number }
   | { type: 'error'; at: number; message: string }
+  | { type: 'highlight'; at: number; game_id: string; level: string; title: string }
+  | { type: 'report_ready'; at: number; report: Report }
+  | { type: 'goal'; at: number; goal: Goal; state: GoalProgress['state'] }
+  | { type: 'storage_cleaned'; at: number; count: number; bytes: number }
 
 // ── endpoints ────────────────────────────────────────────────────────────────
 
@@ -256,6 +389,41 @@ export const desktop = {
   importClips: () => post<{ added: number; removed: number }>('/clips/import'),
   clipFile: (id: number) => mediaUrl(`/clips/${id}/file`),
   clipThumb: (id: number) => mediaUrl(`/clips/${id}/thumb`),
+
+  // editing & sharing
+  montage: (clip_ids: number[], title?: string) => post<Clip>('/clips/montage', { clip_ids, title }),
+  caption: (id: number, text: string, position: 'top' | 'bottom' = 'bottom') => post<Clip>(`/clips/${id}/caption`, { text, position }),
+  vertical: (id: number, mode: 'blur' | 'crop' = 'blur') => post<Clip>(`/clips/${id}/vertical`, { mode }),
+  withoutMic: (id: number) => post<Clip>(`/clips/${id}/without-mic`),
+  share: (id: number) => post<Clip>(`/clips/${id}/share`),
+  clipMatch: (id: number) => call<{ match: ClipMatch | null }>(`/clips/${id}/match`),
+  matchClips: (game: string, key: string) => call<Record<string, number[]>>(`/matches/${enc(game)}/${enc(key)}/clips`),
+
+  // storage
+  storage: (max_days?: number, max_gb?: number) => {
+    const qs = new URLSearchParams()
+    if (max_days !== undefined) qs.set('max_days', String(max_days))
+    if (max_gb !== undefined) qs.set('max_gb', String(max_gb))
+    return call<StorageInfo>(`/storage?${qs}`)
+  },
+  cleanStorage: () => post<{ count: number; bytes: number }>('/storage/clean'),
+
+  // sessions, goals, friends
+  reports: (limit = 20) => call<Report[]>(`/reports?limit=${limit}`),
+  session: () => call<SessionView>('/session'),
+  goals: () => call<Goal[]>('/goals'),
+  addGoal: (goal: { kind: GoalKind; target: number; game_id?: string | null; label?: string | null }) => post<Goal>('/goals', goal),
+  deleteGoal: (id: number) => call<{ ok: true }>(`/goals/${id}`, { method: 'DELETE' }),
+  friends: () => call<{ cards: FriendCard[]; items: FriendItem[] }>('/friends'),
+  addFriend: (game: string, query: string) => post<FriendCard>('/friends', { game, query }),
+  removeFriend: (game: string, key: string) => call<{ ok: true }>(`/friends/${enc(game)}/${enc(key)}`, { method: 'DELETE' }),
+  refreshFriends: () => post<{ refreshed: number }>('/friends/refresh'),
+
+  // auto-clip & keys
+  autoclip: () => call<AutoClipGame[]>('/autoclip'),
+  installAutoclip: (id: string) => post<{ path: string }>(`/autoclip/${enc(id)}/install`),
+  keys: () => call<ApiKeys>('/keys'),
+  saveKeys: (values: Record<string, string | null>) => call<ApiKeys>('/keys', { method: 'PUT', body: JSON.stringify(values) }),
 }
 
 // ── live events ──────────────────────────────────────────────────────────────
@@ -267,7 +435,7 @@ let source: EventSource | null = null
 function ensureSource() {
   if (source || !isDesktop) return
   source = new EventSource(mediaUrl('/events'))
-  const types: DesktopEvent['type'][] = ['clip_saved', 'clip_updated', 'clip_saving', 'buffer', 'recording', 'game_started', 'session_end', 'launching', 'stats_synced', 'error']
+  const types: DesktopEvent['type'][] = ['clip_saved', 'clip_updated', 'clip_saving', 'buffer', 'recording', 'game_started', 'session_end', 'launching', 'stats_synced', 'error', 'highlight', 'report_ready', 'goal', 'storage_cleaned']
   for (const t of types) {
     source.addEventListener(t, (msg) => {
       const event = JSON.parse((msg as MessageEvent).data) as DesktopEvent

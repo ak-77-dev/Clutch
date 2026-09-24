@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
@@ -20,6 +21,31 @@ def data_dir() -> Path:
         base = Path.home() / ".clutch"
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+ALREADY_RUNNING = 75  # exit code: another desktop backend owns this data folder
+
+
+def acquire_instance_lock(path: Path) -> Any:
+    """Hold an exclusive lock on ``path`` for the life of the process, or return None if
+    another process has it. One desktop backend per data folder: two would fight over the
+    replay buffer, the hotkeys' clip folder and the database."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+")  # noqa: SIM115 - kept open on purpose: closing releases the lock
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def default_clips_dir() -> Path:
@@ -104,6 +130,8 @@ class SettingsStore:
         except (OSError, ValueError):
             return Settings()
         known = {f.name for f in fields(Settings)}
+        # Settings saved before the first-run setup existed belong to someone who already set Clutch up.
+        raw.setdefault("onboarded", True)
         return Settings(**{k: v for k, v in raw.items() if k in known})
 
     def get(self) -> Settings:

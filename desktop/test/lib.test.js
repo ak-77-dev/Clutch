@@ -44,3 +44,35 @@ test('session recap notifications respect the setting', () => {
   assert.equal(sessionNotification({ ...e, notify: false }), null)
   assert.equal(hours(59 * 60), '59m')
 })
+
+const { encode, decode, activityFor } = require('../discord')
+const { eventNotification } = require('../lib')
+
+test('discord IPC frames round-trip, including split reads', () => {
+  const a = encode(1, { cmd: 'SET_ACTIVITY', nonce: 'x' })
+  const b = encode(2, { message: 'bye' })
+  const both = Buffer.concat([a, b])
+  const [first, rest] = decode(both.subarray(0, a.length + 5))
+  assert.deepEqual(first, [{ op: 1, data: { cmd: 'SET_ACTIVITY', nonce: 'x' } }])
+  const [second, none] = decode(Buffer.concat([rest, both.subarray(a.length + 5)]))
+  assert.deepEqual(second, [{ op: 2, data: { message: 'bye' } }])
+  assert.equal(none.length, 0)
+})
+
+test('rich presence text', () => {
+  assert.equal(activityFor({ playing: null }), null)
+  const act = activityFor({ playing: { game_name: 'VALORANT', started_at: 100 }, rank: 'Gold 3', today: { wins: 3, losses: 1 }, session_clips: 2 })
+  assert.equal(act.details, 'Playing VALORANT')
+  assert.equal(act.state, 'Gold 3 · 3W 1L today · 2 clips')
+  assert.equal(act.timestamps.start, 100000)
+})
+
+test('highlight, goal and report notifications', () => {
+  assert.deepEqual(overlayFor({ type: 'clip_saved', clip: { kind: 'clip', title: '⚡ Triple kill · Dota 2' } }).title, 'Highlight clipped')
+  assert.equal(overlayFor({ type: 'clip_saved', clip: { kind: 'export', title: 'x' } }), null)
+  assert.equal(overlayFor({ type: 'goal', state: 'over', goal: { target: 3, progress: { value: 3.2 } } }).tone, 'error')
+  const r = eventNotification({ type: 'report_ready', report: { game_name: 'Dota 2', seconds: 5400, clips: [1, 2], stats: { wins: 3, losses: 2 } } })
+  assert.equal(r.title, 'Dota 2 report card · 3W 2L')
+  assert.equal(eventNotification({ type: 'goal', state: 'done', goal: { kind: 'rank', label: 'Diamond 1' } }).body, 'Reached Diamond 1')
+  assert.equal(eventNotification({ type: 'buffer' }), null)
+})

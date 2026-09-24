@@ -322,3 +322,51 @@ def test_goal_friend_report_and_session_routes(api):
     assert client.get("/api/desktop/session", headers=h).json()["playing"] is None
     assert client.get("/api/desktop/storage", headers=h).json()["plan"]["count"] == 0
     assert [g["game_id"] for g in client.get("/api/desktop/autoclip", headers=h).json()] == ["riot:league_of_legends", "steam:570"]
+
+
+def test_keys_write_env_keeps_other_lines(tmp_path, monkeypatch):
+    from clutch.local import keys
+
+    env = tmp_path / ".env"
+    env.write_text("# comment\nRIOT_API_KEY=old\nOTHER=1\n", encoding="utf-8")
+    monkeypatch.setenv("CLUTCH_ENV_FILE", str(env))
+    monkeypatch.delenv("HENRIK_API_KEY", raising=False)  # restored after the test
+    monkeypatch.delenv("RIOT_API_KEY", raising=False)
+    out = keys.update({"RIOT_API_KEY": "RGAPI-new-key-1234", "HENRIK_API_KEY": "HDEV-abc"})
+    text = env.read_text(encoding="utf-8")
+    assert "# comment" in text and "OTHER=1" in text and "RIOT_API_KEY=RGAPI-new-key-1234" in text and "HENRIK_API_KEY=HDEV-abc" in text
+    assert "old" not in text
+    riot = next(k for k in out["keys"] if k["name"] == "RIOT_API_KEY")
+    assert riot["set"] and riot["preview"].endswith("1234") and "RGAPI" not in riot["preview"]
+    keys.update({"RIOT_API_KEY": ""})
+    assert "RIOT_API_KEY" not in env.read_text(encoding="utf-8")
+    import os
+
+    assert "RIOT_API_KEY" not in os.environ
+    try:
+        keys.update({"PATH": "x"})
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+
+def test_existing_settings_skip_first_run_setup(tmp_path):
+    from clutch.local.config import SettingsStore
+
+    fresh = SettingsStore(tmp_path / "new.json")
+    assert fresh.get().onboarded is False
+    old = tmp_path / "old.json"
+    old.write_text('{"hotkey_clip": "["}', encoding="utf-8")
+    assert SettingsStore(old).get().onboarded is True
+
+
+def test_one_desktop_backend_per_data_folder(tmp_path):
+    from clutch.local.config import acquire_instance_lock
+
+    first = acquire_instance_lock(tmp_path / "backend.lock")
+    assert first is not None
+    assert acquire_instance_lock(tmp_path / "backend.lock") is None
+    first.close()  # the owner exiting frees it
+    again = acquire_instance_lock(tmp_path / "backend.lock")
+    assert again is not None
+    again.close()

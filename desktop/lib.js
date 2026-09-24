@@ -57,7 +57,9 @@ function overlayFor(event) {
   switch (event.type) {
     case 'clip_saved': {
       const c = event.clip || {}
-      const what = c.kind === 'screenshot' ? 'Screenshot saved' : c.kind === 'recording' ? 'Recording saved' : 'Clip saved'
+      if ((c.title || '').startsWith('⚡')) return { title: 'Highlight clipped', sub: c.title.slice(1).trim(), tone: 'ok', sound: 'clip' }
+      const what = c.kind === 'screenshot' ? 'Screenshot saved' : c.kind === 'recording' ? 'Recording saved' : c.kind === 'export' ? null : 'Clip saved'
+      if (!what) return null // exports are made from inside the app
       // The sound already played when the key was pressed (see pressFeedback); this just confirms.
       return { title: what, sub: [c.game_name || 'Desktop', c.duration ? `${Math.round(c.duration)}s` : null].filter(Boolean).join(' · '), tone: 'ok', sound: null }
     }
@@ -67,6 +69,12 @@ function overlayFor(event) {
       return { title: event.game_name, sub: 'Clutch is tracking · replay buffer armed', tone: 'info', sound: null }
     case 'error':
       return { title: 'Clutch', sub: event.message, tone: 'error', sound: 'error' }
+    case 'goal': {
+      const g = event.goal || {}
+      if (event.state === 'over') return { title: 'Daily cap reached', sub: `${g.progress?.value}h played today — your limit is ${g.target}h`, tone: 'error', sound: 'error' }
+      if (event.state === 'close') return { title: 'Almost at your cap', sub: `${g.progress?.value}h of ${g.target}h today`, tone: 'info', sound: null }
+      return null
+    }
     default:
       return null
   }
@@ -87,4 +95,28 @@ function sessionNotification(event) {
   return { title: `${event.game_name} · ${hours(event.seconds)}`, body: `Session recap${clips}. Open Clutch to review.` }
 }
 
-module.exports = { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, hours }
+/** Desktop notifications for things that happen after the game (report cards, goals, cleanups). */
+function eventNotification(event) {
+  if (event.type === 'report_ready') {
+    const r = event.report || {}
+    const s = r.stats
+    const record = s ? ` · ${s.wins}W ${s.losses}L` : ''
+    return { title: `${r.game_name} report card${record}`, body: `${hours(r.seconds || 0)} played${r.clips?.length ? ` · ${r.clips.length} clips` : ''}. Open Clutch for the details.` }
+  }
+  if (event.type === 'goal' && event.state === 'done') return { title: 'Goal reached', body: goalName(event.goal) }
+  if (event.type === 'storage_cleaned') return { title: 'Clips folder tidied', body: `${event.count} old clip${event.count > 1 ? 's' : ''} moved to the Recycle Bin.` }
+  return null
+}
+
+function goalName(g = {}) {
+  return (
+    {
+      weekly_hours: `Played ${g.target}h this week`,
+      clips: `${g.target} clips this week`,
+      win_rate: `${g.target}% win rate`,
+      rank: `Reached ${g.label || 'your rank goal'}`,
+    }[g.kind] || 'Goal complete'
+  )
+}
+
+module.exports = { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification, hours }

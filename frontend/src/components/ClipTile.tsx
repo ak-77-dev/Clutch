@@ -6,7 +6,8 @@ import { StarIcon } from './Icons'
 const KIND: Record<Clip['kind'], string> = { clip: 'Clip', recording: 'Rec', screenshot: 'Shot', export: 'Export' }
 
 /** A clip card: thumbnail, and on hover a muted preview that scrubs with the mouse (like Medal). */
-export function ClipTile({ clip, onOpen }: { clip: Clip; onOpen: () => void }) {
+/** `order` (1-based) marks the tile as picked in select mode, e.g. for a montage. */
+export function ClipTile({ clip, onOpen, order }: { clip: Clip; onOpen: () => void; order?: number | null }) {
   const video = useRef<HTMLVideoElement>(null)
   const [previewing, setPreviewing] = useState(false)
   const [pos, setPos] = useState<number | null>(null)
@@ -21,7 +22,7 @@ export function ClipTile({ clip, onOpen }: { clip: Clip; onOpen: () => void }) {
   }
 
   return (
-    <button className="ctile brackets" onClick={onOpen} title={clip.title}>
+    <button className={`ctile brackets ${order ? 'picked' : ''}`} onClick={onOpen} title={clip.title} aria-pressed={order === undefined ? undefined : Boolean(order)}>
       <div
         className={`thumb ${previewing ? 'previewing' : ''}`}
         onMouseEnter={() => isVideo && setPreviewing(true)}
@@ -41,6 +42,8 @@ export function ClipTile({ clip, onOpen }: { clip: Clip; onOpen: () => void }) {
         )}
         {clip.duration ? <span className="dur">{fmtClock(clip.duration)}</span> : null}
         {pos !== null && <span className="scrub" style={{ width: `${pos * 100}%` }} />}
+        {order ? <span className="pick">{order}</span> : null}
+        {clip.share_url ? <span className="badge shared">Shared</span> : null}
       </div>
       <div className="ctitle">{clip.title}</div>
       <div className="cmeta">

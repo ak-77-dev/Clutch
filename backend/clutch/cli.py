@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -19,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--desktop", action="store_true", help="enable local features: library, launcher, playtime, clipping")
     args = parser.parse_args(argv)
 
+    load_dotenv(Path.cwd() / ".env")  # the installed app keeps keys next to its database
     load_dotenv()
     if args.db:
         os.environ["CLUTCH_DB"] = args.db
@@ -26,6 +29,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.host not in ("127.0.0.1", "localhost"):
             parser.error("--desktop only binds to 127.0.0.1: it can launch programs and delete files")
         os.environ["CLUTCH_DESKTOP"] = "1"
+        from clutch.local.config import ALREADY_RUNNING, acquire_instance_lock, data_dir
+
+        lock = acquire_instance_lock(data_dir() / "backend.lock")
+        if lock is None:
+            print("Another Clutch desktop backend is already running for this data folder.", file=sys.stderr, flush=True)
+            return ALREADY_RUNNING
+        # Who holds the lock (the lock file itself can't be read while locked on Windows).
+        (data_dir() / "backend.pid").write_text(f"{os.getpid()} {args.port}", encoding="utf-8")
         if not os.environ.get("CLUTCH_TOKEN"):
             import secrets
 

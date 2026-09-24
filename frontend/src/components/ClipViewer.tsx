@@ -1,8 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
-import { desktop, type Clip } from '../desktop'
+import { Link } from 'react-router-dom'
+import { bridge, desktop, type Clip, type ClipMatch } from '../desktop'
 import { fmtBytes, fmtClock } from '../format'
-import { ChevronLeft, ChevronRight, CloseIcon, DiscordIcon, FolderIcon, GifIcon, ScissorsIcon, StarIcon, TrashIcon } from './Icons'
+import { useGames } from '../hooks'
+import {
+  ChevronLeft,
+  ChevronRight,
+  CloseIcon,
+  DiscordIcon,
+  FolderIcon,
+  GifIcon,
+  LinkIcon,
+  MicOffIcon,
+  PhoneIcon,
+  ScissorsIcon,
+  ShareIcon,
+  StarIcon,
+  TextIcon,
+  TrashIcon,
+} from './Icons'
 import { useDesktop } from './Shell'
+
+const HOSTS = { catbox: 'catbox.moe (public, permanent)', litterbox: 'litterbox.catbox.moe (public, deleted after 72 hours)' }
+
+function copyText(text: string) {
+  if (bridge?.copy) bridge.copy(text)
+  else void navigator.clipboard?.writeText(text)
+}
+
+function openUrl(url: string) {
+  if (bridge?.openExternal) bridge.openExternal(url)
+  else window.open(url, '_blank', 'noopener')
+}
 
 /**
  * Full-screen clip viewer with an in/out trim range.
@@ -23,7 +52,12 @@ export function ClipViewer({
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const bar = useRef<HTMLDivElement>(null)
-  const { toast } = useDesktop()
+  const { toast, settings } = useDesktop()
+  const games = useGames()
+  const [caption, setCaption] = useState('')
+  const [capPos, setCapPos] = useState<'top' | 'bottom'>('bottom')
+  const [shareUrl, setShareUrl] = useState<string | null>(clip.share_url ?? null)
+  const [match, setMatch] = useState<ClipMatch | null>(null)
   const [title, setTitle] = useState(clip.title)
   const [fav, setFav] = useState(clip.favorite)
   const [t, setT] = useState(0)
@@ -38,7 +72,23 @@ export function ClipViewer({
     setFav(clip.favorite)
     setRange([0, clip.duration ?? 0])
     setT(0)
-  }, [clip.id, clip.title, clip.favorite, clip.duration])
+    setShareUrl(clip.share_url ?? null)
+    setCaption('')
+  }, [clip.id, clip.title, clip.favorite, clip.duration, clip.share_url])
+
+  // Which match this clip is from (only when the game's stats account is linked).
+  useEffect(() => {
+    setMatch(null)
+    if (clip.kind === 'screenshot') return
+    let live = true
+    desktop.clipMatch(clip.id).then(
+      (r) => live && setMatch(r.match),
+      () => {},
+    )
+    return () => {
+      live = false
+    }
+  }, [clip.id, clip.kind])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -98,6 +148,26 @@ export function ClipViewer({
       onChanged(result && (result as Clip).id ? (result as Clip).id : undefined)
     } catch (e) {
       toast({ title: `${name} failed`, sub: (e as Error).message, tone: 'error' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function share() {
+    const host = settings?.share_host ?? 'catbox'
+    const ok = window.confirm(
+      `Upload “${clip.title}” (${fmtBytes(clip.size)}) to ${HOSTS[host]}?\n\nAnyone with the link can watch it, and Clutch can’t delete it for you afterwards.`,
+    )
+    if (!ok) return
+    setBusy('Share')
+    try {
+      const updated = await desktop.share(clip.id)
+      setShareUrl(updated.share_url ?? null)
+      if (updated.share_url) copyText(updated.share_url)
+      toast({ title: 'Uploaded · link copied', sub: updated.share_url ?? undefined })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Upload failed', sub: (e as Error).message, tone: 'error' })
     } finally {
       setBusy(null)
     }
@@ -205,6 +275,114 @@ export function ClipViewer({
               </button>
               <button className="btn" disabled={busy !== null} onClick={() => void run('Export', () => desktop.compact(clip.id, range[0], range[1]), 'Discord-ready MP4 saved')}>
                 <DiscordIcon /> {busy === 'Export' ? 'Encoding…' : 'Export under 10 MB (Discord)'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {match && (
+          <Link className={`clip-match ${match.result}`} to={`/${match.game}/p/${encodeURIComponent(match.key)}`}>
+            <span className="res">{match.result === 'win' ? 'W' : match.result === 'loss' ? 'L' : '—'}</span>
+            <span style={{ minWidth: 0 }}>
+              <span className="t">
+                {match.character}
+                {match.score_line ? ` · ${match.score_line}` : ''}
+              </span>
+              <span className="s">
+                {games.find((g) => g.id === match.game)?.name ?? match.game} · {match.mode}
+                {match.map ? ` · ${match.map}` : ''}
+              </span>
+            </span>
+            <span className="go">match →</span>
+          </Link>
+        )}
+
+        {isVideo && (
+          <div>
+            <h2 className="section-title">Share</h2>
+            {shareUrl ? (
+              <div className="share-link">
+                <LinkIcon />
+                <span className="url" title={shareUrl}>
+                  {shareUrl.replace(/^https:\/\//, '')}
+                </span>
+                <button
+                  className="btn small"
+                  onClick={() => {
+                    copyText(shareUrl)
+                    toast({ title: 'Link copied' })
+                  }}
+                >
+                  Copy
+                </button>
+                <button className="btn small ghost" onClick={() => openUrl(shareUrl)}>
+                  Open
+                </button>
+              </div>
+            ) : (
+              <>
+                <button className="btn" style={{ width: '100%' }} disabled={busy !== null} onClick={() => void share()}>
+                  <ShareIcon /> {busy === 'Share' ? 'Uploading…' : 'Get a share link'}
+                </button>
+                <p className="hint">Public upload to {(settings?.share_host ?? 'catbox') === 'catbox' ? 'catbox.moe' : 'litterbox (gone after 72 h)'}. Change it in Settings.</p>
+              </>
+            )}
+          </div>
+        )}
+
+        {isVideo && (
+          <div>
+            <h2 className="section-title">Remix</h2>
+            <div className="action-list">
+              <div className="caption-box">
+                <label className="field">
+                  <TextIcon />
+                  <input value={caption} maxLength={80} onChange={(e) => setCaption(e.target.value)} placeholder="Caption text" aria-label="Caption text" />
+                </label>
+                <div className="spread">
+                  <div className="seg">
+                    {(['top', 'bottom'] as const).map((p) => (
+                      <button key={p} aria-pressed={capPos === p} onClick={() => setCapPos(p)}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="btn small"
+                    disabled={!caption.trim() || busy !== null}
+                    onClick={() => void run('Caption', () => desktop.caption(clip.id, caption.trim(), capPos), 'Captioned copy saved')}
+                  >
+                    {busy === 'Caption' ? 'Rendering…' : 'Burn in'}
+                  </button>
+                </div>
+              </div>
+              <div className="row" style={{ gap: 6 }}>
+                <button
+                  className="btn"
+                  style={{ flex: 1 }}
+                  disabled={busy !== null}
+                  title="The whole frame, centered on a blurred fill"
+                  onClick={() => void run('9:16', () => desktop.vertical(clip.id, 'blur'), '9:16 copy saved')}
+                >
+                  <PhoneIcon /> {busy === '9:16' ? 'Rendering…' : '9:16 fit'}
+                </button>
+                <button
+                  className="btn"
+                  style={{ flex: 1 }}
+                  disabled={busy !== null}
+                  title="Crop the middle of the screen to fill a phone"
+                  onClick={() => void run('Crop', () => desktop.vertical(clip.id, 'crop'), '9:16 crop saved')}
+                >
+                  <PhoneIcon /> {busy === 'Crop' ? 'Rendering…' : '9:16 crop'}
+                </button>
+              </div>
+              <button
+                className="btn"
+                disabled={busy !== null}
+                title="Works on clips saved with “Separate audio tracks” on"
+                onClick={() => void run('Mic removal', () => desktop.withoutMic(clip.id), 'Copy without your mic saved')}
+              >
+                <MicOffIcon /> {busy === 'Mic removal' ? 'Remuxing…' : 'Copy without my mic'}
               </button>
             </div>
           </div>

@@ -75,6 +75,10 @@ class Montage(BaseModel):
     title: str | None = None
 
 
+class Keys(BaseModel):
+    model_config = {"extra": "allow"}
+
+
 class Caption(BaseModel):
     text: str
     position: str = "bottom"
@@ -439,6 +443,18 @@ def router(desktop: Desktop) -> APIRouter:
         try:
             return {"path": desktop.install_autoclip(game_id)}
         except (KeyError, ValueError) as exc:
+            raise _bad(exc) from None
+
+    # ── API keys ────────────────────────────────────────────────────────────
+    @r.get("/keys")
+    def get_keys() -> dict[str, Any]:
+        return desktop.keys_view()
+
+    @r.put("/keys")
+    def put_keys(body: Keys) -> dict[str, Any]:
+        try:
+            return desktop.set_keys(body.model_dump())
+        except ValueError as exc:
             raise _bad(exc) from None
 
     @r.post("/clips/import")

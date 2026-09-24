@@ -1,37 +1,231 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Hotkey, Toggle } from '../components/Controls'
 import { useDesktop } from '../components/Shell'
-import { bridge, desktop, type Capabilities, type Settings } from '../desktop'
-import { useGames } from '../hooks'
-import { accelerator, estimateSize } from '../format'
-import { DesktopOnly } from './DesktopOnly'
+import { bridge, desktop, type ApiKeys, type AutoClipGame, type Capabilities, type Settings, type StorageInfo } from '../desktop'
+import { useGames, useReloadGames } from '../hooks'
+import { estimateSize, fmtBytes } from '../format'
 
-function Hotkey({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [listening, setListening] = useState(false)
-  useEffect(() => {
-    if (!listening) return
-    function onKey(e: KeyboardEvent) {
-      e.preventDefault()
-      if (e.key === 'Escape') return setListening(false)
-      const acc = accelerator(e)
-      if (acc) {
-        onChange(acc)
-        setListening(false)
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [listening, onChange])
+const LOL_PLATFORMS = ['na1', 'euw1', 'eun1', 'kr', 'br1', 'la1', 'la2', 'oc1', 'tr1', 'ru', 'jp1', 'me1', 'ph2', 'sg2', 'th2', 'tw2', 'vn2']
+// Settings the Electron shell reads itself (global hotkeys, the in-game panel, Discord).
+const SHELL_KEYS = ['hotkey_', 'overlay_', 'discord_']
+
+/** A text setting that saves when you leave the field or press Enter. */
+function TextSetting({ value, onSave, placeholder, secret = false, width = 260 }: { value: string; onSave: (v: string) => void; placeholder?: string; secret?: boolean; width?: number }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
   return (
-    <button className={`hotkey ${listening ? 'listening' : ''}`} onClick={() => setListening(true)} onBlur={() => setListening(false)}>
-      {listening ? 'Press a key…' : value.replace('CommandOrControl', 'Ctrl')}
-    </button>
+    <label className="field" style={{ width }}>
+      <input
+        type={secret ? 'password' : 'text'}
+        value={draft}
+        placeholder={placeholder}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => draft.trim() !== value && onSave(draft.trim())}
+        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      />
+    </label>
   )
 }
 
-function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
-  return <button className="switch" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)} />
+/** Riot / HenrikDev / ballchasing keys, written to the .env next to Clutch's database. */
+function ApiKeysCard() {
+  const { toast } = useDesktop()
+  const reloadGames = useReloadGames()
+  const [keys, setKeys] = useState<ApiKeys | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  useEffect(() => {
+    desktop.keys().then(setKeys, () => {})
+  }, [])
+
+  async function save(values: Record<string, string | null>, what: string) {
+    try {
+      setKeys(await desktop.saveKeys(values))
+      setDrafts({})
+      reloadGames()
+      toast({ title: what })
+    } catch (e) {
+      toast({ title: 'Couldn’t save the key', sub: (e as Error).message, tone: 'error' })
+    }
+  }
+
+  if (!keys) return null
+  return (
+    <section className="card">
+      <h2>API keys</h2>
+      <p className="sub">Games with a key show live stats; without one they show demo data. Dota 2 and Deadlock don’t need one. The CoD token is your ACT_SSO_COOKIE from callofduty.com (experimental).</p>
+      {keys.keys.map((k) => (
+        <Row key={k.name} t={k.label} h={k.set ? `Saved · ${k.preview}` : `Not set · get one at ${k.help.replace('https://', '')}`}>
+          <label className="field" style={{ width: 230 }}>
+            <input
+              type="password"
+              value={drafts[k.name] ?? ''}
+              placeholder={k.set ? 'Replace key…' : 'Paste key'}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setDrafts((d) => ({ ...d, [k.name]: e.target.value }))}
+              onKeyDown={(e) => e.key === 'Enter' && drafts[k.name]?.trim() && void save({ [k.name]: drafts[k.name].trim() }, `${k.label} saved`)}
+            />
+          </label>
+          <button className="btn small" disabled={!drafts[k.name]?.trim()} onClick={() => void save({ [k.name]: drafts[k.name].trim() }, `${k.label} saved`)}>
+            Save
+          </button>
+          {k.set && (
+            <button className="btn small ghost" onClick={() => window.confirm(`Remove the ${k.label}?`) && void save({ [k.name]: null }, `${k.label} removed`)}>
+              Remove
+            </button>
+          )}
+          <button className="btn small ghost" title={k.help} onClick={() => bridge?.openExternal?.(k.help)}>
+            Get one ↗
+          </button>
+        </Row>
+      ))}
+      <Row t="League region" h="Where your League account plays.">
+        <label className="field" style={{ width: 120 }}>
+          <select value={keys.lol_platform} onChange={(e) => void save({ LOL_PLATFORM: e.target.value }, 'Region saved')}>
+            {LOL_PLATFORMS.map((p) => (
+              <option key={p} value={p}>
+                {p.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+      </Row>
+      <p className="mono muted" style={{ margin: '10px 0 0', fontSize: 10.5 }}>
+        Stored on this PC only · {keys.path}
+      </p>
+    </section>
+  )
 }
+
+function AutoClipCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) => Promise<void> }) {
+  const { toast } = useDesktop()
+  const [games, setGames] = useState<AutoClipGame[]>([])
+  const load = () => desktop.autoclip().then(setGames, () => {})
+  useEffect(() => {
+    void load()
+  }, [])
+  return (
+    <section className="card">
+      <h2>Auto-clip highlights</h2>
+      <Row t="Save highlights automatically" h="Clutch listens to the game’s own live data and clips kills for you, a few seconds after the moment. Needs the replay buffer on.">
+        <Toggle label="Auto-clip" on={s.auto_clip} onChange={(v) => void save({ auto_clip: v })} />
+      </Row>
+      {s.auto_clip && (
+        <>
+          <Row t="Clip on" h="The smallest moment worth a clip: anything that big or bigger gets saved.">
+            <div className="seg">
+              {(['kill', 'multikill', 'ace'] as const).map((k) => (
+                <button key={k} aria-pressed={s.auto_clip_min === k} onClick={() => void save({ auto_clip_min: k })}>
+                  {k === 'kill' ? 'Every kill' : k === 'multikill' ? 'Multikills' : 'Aces / pentas'}
+                </button>
+              ))}
+            </div>
+          </Row>
+          {games.map((g) => (
+            <Row key={g.game_id} t={g.name} h={g.method}>
+              {!g.needs_install || g.installed ? (
+                <span className="mono pill-ok" style={{ fontSize: 11 }}>
+                  ● ready
+                </span>
+              ) : (
+                <button
+                  className="btn small"
+                  onClick={() =>
+                    void desktop.installAutoclip(g.game_id).then(
+                      (r) => {
+                        toast({ title: `${g.name} connected`, sub: `Restart the game once · ${r.path}` })
+                        void load()
+                      },
+                      (e: Error) => toast({ title: 'Couldn’t set it up', sub: e.message, tone: 'error' }),
+                    )
+                  }
+                >
+                  Connect
+                </button>
+              )}
+            </Row>
+          ))}
+          <p className="hint" style={{ margin: '8px 0 0' }}>
+            Valorant, Rocket League and CoD don’t publish live kill data, so use the clip hotkey there.
+          </p>
+        </>
+      )}
+    </section>
+  )
+}
+
+function StorageCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) => Promise<void> }) {
+  const { toast } = useDesktop()
+  const [info, setInfo] = useState<StorageInfo | null>(null)
+  const [cleaning, setCleaning] = useState(false)
+  useEffect(() => {
+    desktop.storage().then(setInfo, () => {})
+  }, [s.storage_max_days, s.storage_max_gb])
+  const plan = info?.plan
+  return (
+    <>
+      <Row t="Delete old clips" h="Older clips go to the Recycle Bin. Favorites are always kept.">
+        <div className="seg">
+          {[0, 7, 30, 90].map((d) => (
+            <button key={d} aria-pressed={s.storage_max_days === d} onClick={() => void save({ storage_max_days: d })}>
+              {d ? `${d} days` : 'Never'}
+            </button>
+          ))}
+        </div>
+      </Row>
+      <Row t="Size limit" h="When clips pass this size, the oldest non-favorites go first.">
+        <div className="seg">
+          {[0, 25, 50, 100, 250].map((g) => (
+            <button key={g} aria-pressed={s.storage_max_gb === g} onClick={() => void save({ storage_max_gb: g })}>
+              {g ? `${g} GB` : 'None'}
+            </button>
+          ))}
+        </div>
+      </Row>
+      {info && (
+        <div className="storage-meter">
+          <div className="spread">
+            <span className="mono" style={{ fontSize: 12 }}>
+              {info.count} files · {fmtBytes(info.bytes)}
+              {s.storage_max_gb ? ` of ${s.storage_max_gb} GB` : ''}
+            </span>
+            {plan && plan.count > 0 ? (
+              <button
+                className="btn small danger"
+                disabled={cleaning}
+                onClick={async () => {
+                  setCleaning(true)
+                  try {
+                    const r = await desktop.cleanStorage()
+                    toast({ title: `Cleaned up ${r.count} file${r.count === 1 ? '' : 's'}`, sub: `${fmtBytes(r.bytes)} freed · in the Recycle Bin` })
+                    setInfo(await desktop.storage())
+                  } finally {
+                    setCleaning(false)
+                  }
+                }}
+              >
+                {cleaning ? 'Cleaning…' : `Clean ${plan.count} now (${fmtBytes(plan.bytes)})`}
+              </button>
+            ) : (
+              <span className="mono muted" style={{ fontSize: 11 }}>
+                {s.storage_max_days || s.storage_max_gb ? 'nothing to clean' : 'no limits set'}
+              </span>
+            )}
+          </div>
+          {s.storage_max_gb > 0 && (
+            <div className={`goal-bar ${info.bytes > s.storage_max_gb * 1e9 ? 'over' : ''}`}>
+              <i style={{ width: `${Math.min(100, (info.bytes / (s.storage_max_gb * 1e9)) * 100)}%` }} />
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+import { DesktopOnly } from './DesktopOnly'
 
 function Row({ t, h, children }: { t: string; h?: string; children: React.ReactNode }) {
   return (
@@ -70,7 +264,7 @@ function SettingsInner() {
     try {
       const next = await desktop.saveSettings(patch)
       setSettings(next)
-      if (Object.keys(patch).some((k) => k.startsWith('hotkey_'))) bridge?.reloadHotkeys()
+      if (Object.keys(patch).some((k) => SHELL_KEYS.some((prefix) => k.startsWith(prefix)))) bridge?.reloadHotkeys()
       if ('start_with_windows' in patch) bridge?.setLoginItem(Boolean(patch.start_with_windows))
     } catch (e) {
       toast({ title: 'Couldn’t save that', sub: (e as Error).message, tone: 'error' })
@@ -86,7 +280,7 @@ function SettingsInner() {
       <div className="page-head">
         <div>
           <div className="kicker bare">
-            <b>05</b> Settings
+            <b>07</b> Settings
           </div>
           <h1>
             Dial it <em>in</em>
@@ -226,9 +420,14 @@ function SettingsInner() {
               </label>
             </Row>
           )}
-          <Row t="Microphone" h="Mixed into the same track.">
+          <Row t="Microphone" h={s.separate_audio_tracks ? 'Mixed into the main track, and also saved on its own.' : 'Mixed into the same track.'}>
             <Toggle label="Microphone" on={s.record_mic} onChange={(v) => void save({ record_mic: v })} />
           </Row>
+          {s.record_mic && (
+            <Row t="Separate audio tracks" h="Clips also get game-only and mic-only tracks, so you can export a copy without your voice. Editors like Premiere and DaVinci see all three.">
+              <Toggle label="Separate audio tracks" on={s.separate_audio_tracks} onChange={(v) => void save({ separate_audio_tracks: v })} />
+            </Row>
+          )}
           {s.record_mic && (
             <Row t="Mic device">
               <label className="field" style={{ width: 260 }}>
@@ -271,6 +470,46 @@ function SettingsInner() {
           <Row t="Screenshot">
             <Hotkey value={s.hotkey_screenshot} onChange={(v) => void save({ hotkey_screenshot: v })} />
           </Row>
+          <Row t="Show / hide session panel" h="The in-game panel (see below).">
+            <Hotkey value={s.hotkey_overlay} onChange={(v) => void save({ hotkey_overlay: v })} />
+          </Row>
+        </section>
+
+        <AutoClipCard s={s} save={save} />
+
+        <section className="card">
+          <h2>In game</h2>
+          <Row t="Session panel" h="A small click-through panel in the corner: session time, today’s W/L, clips and your daily cap. Works over borderless-windowed games.">
+            <Toggle label="Session panel" on={s.overlay_enabled} onChange={(v) => void save({ overlay_enabled: v })} />
+          </Row>
+          <Row t="Discord Rich Presence" h="Shows your session time, rank and today’s record on your Discord profile.">
+            <Toggle label="Discord Rich Presence" on={s.discord_rpc} onChange={(v) => void save({ discord_rpc: v })} />
+          </Row>
+          {s.discord_rpc && (
+            <Row
+              t="Discord application ID"
+              h="Create an application at discord.com/developers (free) and paste its Application ID. Its name is what Discord shows after “Playing”, so call it Clutch."
+            >
+              <TextSetting value={s.discord_client_id} placeholder="e.g. 1234567890123456789" onSave={(v) => void save({ discord_client_id: v })} width={230} />
+              <button className="btn small ghost" onClick={() => bridge?.openExternal?.('https://discord.com/developers/applications')}>
+                Open ↗
+              </button>
+            </Row>
+          )}
+        </section>
+
+        <section className="card">
+          <h2>Sharing</h2>
+          <Row t="Share links upload to" h="Uploads are public: anyone with the link can watch. Clutch asks before every upload.">
+            <div className="seg">
+              <button aria-pressed={s.share_host === 'catbox'} onClick={() => void save({ share_host: 'catbox' })}>
+                catbox · permanent
+              </button>
+              <button aria-pressed={s.share_host === 'litterbox'} onClick={() => void save({ share_host: 'litterbox' })}>
+                litterbox · 72 h
+              </button>
+            </div>
+          </Row>
         </section>
 
         <section className="card">
@@ -288,7 +527,10 @@ function SettingsInner() {
               </button>
             )}
           </Row>
+          <StorageCard s={s} save={save} />
         </section>
+
+        <ApiKeysCard />
 
         <section className="card">
           <h2>App</h2>
@@ -301,8 +543,26 @@ function SettingsInner() {
           <Row t="Session recaps" h="A notification with playtime and clips when you close a game.">
             <Toggle label="Session recaps" on={s.notify_sessions} onChange={(v) => void save({ notify_sessions: v })} />
           </Row>
-          <Row t="Refresh stats after games" h="Pull new matches for linked accounts when a session ends.">
+          <Row t="Refresh stats after games" h="Pull new matches for linked accounts when a session ends. Also fills in the session’s report card.">
             <Toggle label="Refresh stats after games" on={s.auto_sync_on_exit} onChange={(v) => void save({ auto_sync_on_exit: v })} />
+          </Row>
+          <Row t="SteamGridDB key" h="Optional: cover art for games outside Steam (Epic, Battle.net, custom). Free at steamgriddb.com → Preferences → API.">
+            <TextSetting value={s.steamgriddb_key} secret placeholder="Paste key" onSave={(v) => void save({ steamgriddb_key: v })} width={230} />
+          </Row>
+          <Row t="First-run setup" h="Walk through hotkeys, clip length and accounts again.">
+            <button className="btn small" onClick={() => void save({ onboarded: false })}>
+              Run again
+            </button>
+          </Row>
+          <Row t="Version" h={bridge?.packaged ? 'Updates download in the background and install when you restart.' : 'Development build: updates are off.'}>
+            <span className="mono" style={{ fontSize: 12 }}>
+              {bridge?.version ?? 'web'}
+            </span>
+            {bridge?.packaged && (
+              <button className="btn small" onClick={() => bridge?.checkUpdates?.()}>
+                Check now
+              </button>
+            )}
           </Row>
         </section>
 
@@ -311,7 +571,7 @@ function SettingsInner() {
           {games.map((g) => {
             const key = s.linked_profiles[g.id]
             return (
-              <Row key={g.id} t={g.name} h={key ? `Linked · ${key}` : g.configured ? 'Link from the game’s library page' : 'Needs an API key in backend/.env'}>
+              <Row key={g.id} t={g.name} h={key ? `Linked · ${key}` : g.configured ? 'Link from the game’s library page' : 'Needs an API key (see API keys above)'}>
                 {key ? (
                   <>
                     <Link className="btn small" to={`/${g.id}/p/${encodeURIComponent(key)}`}>

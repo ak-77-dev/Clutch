@@ -1,17 +1,83 @@
 {
   "name": "clutch-desktop",
   "productName": "Clutch",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Clutch desktop: game launcher, playtime tracker, hotkey clipping and stats hub.",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "dev": "cross-env CLUTCH_DEV_URL=http://localhost:5173 electron .",
-    "check": "node --check main.js && node --check preload.js && node --check lib.js && node --test"
+    "check": "node --check main.js && node --check preload.js && node --check lib.js && node --check discord.js && node --check scripts/build.js && node --test",
+    "dist": "node scripts/build.js",
+    "pack": "electron-builder --win --dir"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "electron": "^44.4.5"
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "author": "ak-77-dev",
+  "build": {
+    "appId": "gg.clutch.desktop",
+    "productName": "Clutch",
+    "copyright": "Clutch",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib.js",
+      "discord.js",
+      "overlay.html",
+      "overlay-panel.html",
+      "assets/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/clutch-backend",
+        "to": "backend"
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "Clutch-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Clutch",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ak-77-dev",
+        "repo": "clutch-releases",
+        "releaseType": "release"
+      }
+    ]
   }
 }

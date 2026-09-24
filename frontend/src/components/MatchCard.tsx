@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { fmtDuration, fmtMetric, RESULT_LABEL, timeAgo } from '../format'
 import type { Game, MatchDetail, MatchSummary, ScoreRow } from '../types'
+import { ClipIcon } from './Icons'
 import { Portrait } from './Portrait'
+
+/** match id -> ids of clips recorded during it (desktop app, linked account only). */
+export const MatchClipsContext = createContext<Record<string, number[]>>({})
 
 function Kda({ m }: { m: MatchSummary }) {
   if (m.metrics.kills === undefined) {
@@ -31,6 +36,7 @@ export function MatchCard({ game, match, playerKey }: { game: Game; match: Match
   const [open, setOpen] = useState(false)
   const [detail, setDetail] = useState<MatchDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const clipIds = useContext(MatchClipsContext)[match.id]
 
   async function toggle() {
     setOpen((o) => !o)
@@ -46,6 +52,11 @@ export function MatchCard({ game, match, playerKey }: { game: Game; match: Match
   const statKeys = game.card_metrics.filter((k) => !['kills', 'deaths', 'assists', 'goals', 'saves'].includes(k))
   return (
     <article className={`match ${match.result}`}>
+      {clipIds?.length ? (
+        <Link className="match-clips" to={`/clips?open=${clipIds[0]}`} title={`${clipIds.length} clip${clipIds.length > 1 ? 's' : ''} from this match`}>
+          <ClipIcon /> {clipIds.length}
+        </Link>
+      ) : null}
       <button className="match-row" onClick={() => void toggle()} aria-expanded={open}>
         <div>
           <div className="res">{RESULT_LABEL[match.result]}</div>

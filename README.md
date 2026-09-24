@@ -3,9 +3,12 @@
 Clutch is a desktop app in the spirit of Blitz.gg and Medal, in one place:
 
 - **Launcher.** Finds every game you have installed across Steam, Epic, Riot, Battle.net, Ubisoft Connect, EA, Rockstar and Xbox, with official cover art, and launches any of them in one click.
-- **Clipping.** A GPU replay buffer runs while you play. Press **F8** and the last 30–300 seconds are saved with game audio (and mic if you want). **F9** records, **F10** screenshots. A toast confirms it over your game.
-- **Media hub.** Every clip in one place: hover-scrub previews, frame-accurate trimming, GIF export, and a one-click "fits in Discord's 10 MB" export.
-- **Playtime.** Every session is tracked automatically: totals, streaks, a 26-week heatmap and per-game history.
+- **Clipping.** A GPU replay buffer runs while you play. Press **F8** and the last 15–300 seconds are saved with game audio (and mic if you want). **F9** records, **F10** screenshots. A toast confirms it over your game.
+- **Auto-clip.** Kills, multikills and aces are clipped for you in League of Legends (Riot's Live Client Data API), Dota 2 and Counter-Strike 2 (Valve Game State Integration, set up with one click).
+- **Media hub.** Every clip in one place: hover-scrub previews, frame-accurate trimming, GIF export, a "fits in Discord's 10 MB" export, captions, 9:16 vertical exports, montages, a copy without your mic (separate audio tracks), and share links. Clips link to the match they were recorded in.
+- **Playtime & sessions.** Every session is tracked automatically: totals, streaks, a 26-week heatmap, and a report card per session (W/L, form vs. usual, MVP game) when the game's account is linked.
+- **Goals & friends.** Daily caps, practice hours, clip counts, win-rate and rank goals. A friends feed built from your friends' public stats profiles.
+- **In game.** A click-through session panel (time, today's record, daily cap) and Discord Rich Presence.
 - **Stats.** Match history, rank climbs and plain-English insights on *what separates your wins from your losses* for League of Legends, Valorant, Rocket League, Dota 2, Deadlock and (experimentally) Call of Duty. Link your accounts and your stats refresh on their own after every session.
 
 ![Clutch home](docs/desktop-home.png)
@@ -42,7 +45,18 @@ cd ../desktop && npm install && npm start
 cd ../backend && clutch serve                           # http://127.0.0.1:8000
 ```
 
-The desktop app starts the backend for you and lives in the tray. Closing the window keeps it running; quit from the tray icon.
+The desktop app starts the backend for you and lives in the tray. Closing the window keeps it running; quit from the tray icon. On first launch a short setup walks through hotkeys, clip length, quality and accounts.
+
+### Windows installer
+
+```bash
+cd clutch/backend && pip install -e ".[desktop,build]"   # + PyInstaller
+cd ../desktop && npm run dist                           # -> desktop/dist/Clutch-Setup-<version>.exe
+```
+
+`npm run dist` freezes the backend with PyInstaller (FFmpeg and PortAudio included), builds the frontend and packages both with electron-builder into an NSIS installer. Installed builds keep their data, API keys (`.env`) and stats database in `%APPDATA%\Clutch`, and check for updates in the background with electron-updater: a new version downloads silently and installs on the next restart.
+
+Releases come from `.github/workflows/clutch-release.yml`: push a tag `clutch-v<version>` matching `desktop/package.json` and a Windows runner builds the installer and publishes it, with the `latest.yml` the updater reads, to the public `ak-77-dev/clutch-releases` repo (needs a `CLUTCH_RELEASES_TOKEN` secret). The installer isn't code-signed, so Windows SmartScreen warns on first run.
 
 ### Hotkeys
 
@@ -51,12 +65,13 @@ The desktop app starts the backend for you and lives in the tray. Closing the wi
 | **F8** | Save the last *N* seconds (default 60) |
 | **F9** | Start / stop a full recording |
 | **F10** | Screenshot |
+| **Alt+O** | Show / hide the in-game session panel |
 
-All three can be rebound in **Settings** by pressing the new key combo. They're global, so they work while a game has focus.
+All of them can be rebound in **Settings** by pressing the new key combo. They're global, so they work while a game has focus.
 
 ### Stats API keys
 
-Copy `backend/.env.example` to `backend/.env` and add whichever keys you have:
+Paste keys in **Settings → API keys** (they're written to the `.env` next to the database), or copy `backend/.env.example` to `backend/.env`:
 
 | Game | Key | Where |
 |---|---|---|
@@ -66,6 +81,8 @@ Copy `backend/.env.example` to `backend/.env` and add whichever keys you have:
 | Dota 2 | none (optional `OPENDOTA_API_KEY` lifts the 60 req/min cap) | [OpenDota](https://docs.opendota.com). The player needs "Expose Public Match Data" on in the Dota client. |
 | Deadlock | none | [deadlock-api.com](https://api.deadlock-api.com/docs) |
 | Call of Duty (experimental) | `COD_SSO_TOKEN` (+ `COD_TITLE`, default `bo7`) | Your own `ACT_SSO_COOKIE` from callofduty.com. Activision has no public API. See below. |
+
+Optional extras, also in Settings: a free [SteamGridDB](https://www.steamgriddb.com/profile/preferences/api) key for cover art on non-Steam games, and a Discord application ID for Rich Presence (create one at [discord.com/developers](https://discord.com/developers/applications) and name it "Clutch": Discord shows "Playing Clutch").
 
 **About Call of Duty.** Activision only opens its stats API to partners. The adapter talks to callofduty.com's own endpoints, signed in as *you* with your session cookie. It's built from those endpoints' documented shape and tested against demo data, but not yet against live responses, so treat it as experimental. Launching, playtime and clipping for CoD don't need any of this.
 
@@ -87,8 +104,17 @@ backend/   FastAPI
      playtime.py     process monitor → sessions
      capture.py      replay buffer, recording, screenshots (FFmpeg + WASAPI)
      clips.py        media hub index, trim, GIF, size-capped export
+     edit.py         montage, captions, 9:16, remove the mic track
+     autoclip.py     highlight detection: Riot Live Client API, Valve GSI (Dota 2, CS2)
+     reports.py      session report cards
+     goals.py        goals and their progress
+     friends.py      friends feed (public stats profiles)
+     share.py        share-link uploads (catbox / litterbox)
+     storage.py      auto-cleanup by age / size (favorites kept)
+     keys.py         API keys from the Settings page
      desktop.py      glue: auto-arm, session recaps, auto stats refresh, event bus
      api.py          /api/desktop/* (token-guarded)
+desktop/discord.js   Discord Rich Presence over Discord's local IPC pipe (no dependency)
 ```
 
 ### The launcher
@@ -111,7 +137,9 @@ Games found by several sources are deduplicated by install folder. Stale entries
 - **Audio.** WASAPI loopback (and optionally the mic) is spooled as raw PCM on a wall-clock timeline, and at the same time encoded to AAC by a live encoder in 1-second segments. Windows sends *no* loopback packets while nothing is playing, so silence is filled in by timestamp. A watchdog follows the default device (Bluetooth headsets switch endpoints whenever a mic turns on) and reopens streams that go quiet, because a WASAPI stream on an invalidated device stops delivering without an error. That silent failure is what produced silent clips before the watchdog existed.
 - **Saving.** A clip is the last N video segments streamed into one MPEG-TS input (TS joins byte-for-byte; the concat demuxer cost ~35 ms per segment) plus the already-encoded AAC. Both are stream-copied, so a clip saves in **~0.4 s** in the running app. The hotkey's sound and toast fire on the key press itself, not when the file is done.
 - **Sync.** Video segments are timed by creation time, corrected for a measured 45 ms pipeline delay (flash + click test: **±10 ms**). Stream-copied AAC can only start on a 1024-sample frame, so whole segments are used and the track is shifted by the exact amount, with the MP4 edit list hiding the lead-in (tested offline: −1.3 ms). The measured 2048-sample AAC delay is included.
-- **Crash safety.** FFmpeg is bound to the backend with a Windows Job Object (`KILL_ON_JOB_CLOSE`), so a crashed backend can't leave a recorder filling the disk. Startup also sweeps for stray recorders from older runs.
+- **Separate tracks.** With the mic on and *Separate audio tracks* enabled, clips carry three tracks: game + mic (what players hear), game only, and mic only. Editors see all three, and "Copy without my mic" keeps just the game.
+- **Auto-clip.** Highlights are saved a few seconds *after* the play, so the clip covers the run-up and the kill. A burst of kills (a triple, an ace) becomes one longer clip, not several. Valorant, Rocket League and CoD publish no live kill data, so they rely on the hotkey.
+- **Crash safety.** FFmpeg is bound to the backend with a Windows Job Object (`KILL_ON_JOB_CLOSE`), so a crashed backend can't leave a recorder filling the disk. Startup also sweeps for stray recorders from older runs, and the backend locks its data folder so only one copy ever runs: the app adopts a twin that answers with its launch token, or stops a leftover from an earlier launch and starts fresh.
 
 ### Security
 
@@ -119,7 +147,8 @@ The desktop API can launch programs and delete files, so:
 - it only exists in desktop mode and only binds to `127.0.0.1`;
 - every request needs a random per-launch token that only the Electron shell and its window know. This stops any web page you visit from sending requests to your local Clutch (localhost CSRF);
 - launching only works for games in your library, never an arbitrary path;
-- deletes go to the Recycle Bin.
+- deletes go to the Recycle Bin;
+- share links are the only uploads, only on a click, and the app says the upload is public before it happens. Friends are public profiles fetched from the same stats APIs; Clutch has no server of its own.
 
 The Electron window runs sandboxed with context isolation. Links to other sites open in your browser.
 
@@ -133,7 +162,7 @@ The Electron window runs sandboxed with context isolation. Links to other sites 
 ## Development
 
 ```bash
-cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 71 tests
+cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 86 tests
 cd frontend && npm test && npm run typecheck && npm run build
 cd desktop  && npm run check                                                  # syntax + node:test
 ```

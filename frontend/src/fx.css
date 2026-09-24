@@ -1,7 +1,7 @@
 /*
  * FX layer: motion and depth on top of the base theme (styles.css).
  * Same palette and shapes; this file only adds light, movement and feedback.
- * Pointer-driven bits (the card spotlight, cover tilt) are wired in fx.ts.
+ * The pointer-driven cover tilt is wired in fx.ts.
  */
 
 /* ── ambient ─────────────────────────────────────────────────────────────── */
@@ -61,11 +61,7 @@ body::before {
 .btn.big.primary::after { animation: sheen 4.5s 1.4s cubic-bezier(.2, .7, .2, 1) infinite; }
 
 /* ── surfaces ────────────────────────────────────────────────────────────── */
-/* A soft spotlight that follows the cursor (fx.ts sets --mx / --my). */
-.card, .report, .friend, .stat-row, .goal-form, .onboard-card, .now-card, .game-card { --mx: -999px; --my: -999px; }
-.card, .report, .friend, .stat-row, .game-card { background-image: radial-gradient(420px circle at var(--mx) var(--my), rgba(212, 255, 58, .1), transparent 50%); }
 .card, .report, .friend, .game-card { transition: border-color .2s, transform .2s cubic-bezier(.2, .7, .2, 1); }
-.card.lit, .friend.lit, .game-card.lit { border-color: rgba(212, 255, 58, .2); }
 
 /* Everything in a grid lands in sequence. */
 :is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > * {

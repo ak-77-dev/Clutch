@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from clutch.local import library as lib
@@ -73,6 +73,17 @@ class SaveClip(BaseModel):
 class Montage(BaseModel):
     clip_ids: list[int]
     title: str | None = None
+
+
+class MediaCommand(BaseModel):
+    session: str | None = None  # a media session id; default: what's playing
+    value: Any = None  # seconds for seek, true/false for shuffle, none/track/list for repeat
+
+
+class MediaVolume(BaseModel):
+    session: str
+    level: float | None = None  # 0..1
+    muted: bool | None = None
 
 
 class Keys(BaseModel):
@@ -444,6 +455,53 @@ def router(desktop: Desktop) -> APIRouter:
             return {"path": desktop.install_autoclip(game_id)}
         except (KeyError, ValueError) as exc:
             raise _bad(exc) from None
+
+    # ── music ───────────────────────────────────────────────────────────────
+    @r.get("/media")
+    def media_state() -> dict[str, Any]:
+        return desktop.media.state()
+
+    @r.get("/media/apps")
+    def media_apps() -> list[dict[str, Any]]:
+        from clutch.local.media import music_apps
+
+        return music_apps()
+
+    @r.post("/media/apps/{key}/launch")
+    def media_launch(key: str) -> dict[str, Any]:
+        from clutch.local.media import launch_music_app
+
+        try:
+            return {"opened": launch_music_app(key)}
+        except KeyError:
+            raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Unknown music app"}) from None
+        except OSError as exc:
+            raise _bad(exc, 500) from None
+
+    @r.post("/media/volume")
+    def media_volume(body: MediaVolume) -> dict[str, Any]:
+        try:
+            return desktop.media.set_volume(body.session, body.level, body.muted)
+        except ValueError as exc:
+            raise _bad(exc) from None
+
+    @r.post("/media/{action}")
+    def media_command(action: str, body: MediaCommand | None = None) -> dict[str, Any]:
+        body = body or MediaCommand()
+        try:
+            return desktop.media.command(action, body.session, body.value)
+        except ValueError as exc:
+            raise _bad(exc) from None
+        except (RuntimeError, TimeoutError) as exc:
+            raise _bad(exc, 503) from None
+
+    @r.get("/media/art/{key}")
+    def media_art(key: str) -> Response:
+        art = desktop.media.art(key)
+        if art is None:
+            raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "No artwork"})
+        data, mime = art
+        return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
 
     # ── API keys ────────────────────────────────────────────────────────────
     @r.get("/keys")

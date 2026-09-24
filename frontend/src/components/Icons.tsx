@@ -40,3 +40,11 @@ export const UsersIcon = (p: P) => S(<><circle cx="9" cy="8" r="3.5" /><path d="
 export const ReportIcon = (p: P) => S(<><path d="M5 3h10l4 4v14H5z" /><path d="M9 17v-3M12 17v-6M15 17v-4" /></>, p)
 export const CheckIcon = (p: P) => S(<path d="m4 12.5 5 5L20 6.5" />, p)
 export const FilmIcon = (p: P) => S(<><rect x="3" y="4" width="18" height="16" /><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" /></>, p)
+export const MusicIcon = (p: P) => S(<><path d="M9 18V5l11-2v13" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="17.5" cy="16" r="2.5" /></>, p)
+export const PauseIcon = (p: P) => S(<path d="M7 4.5h3.5v15H7zM13.5 4.5H17v15h-3.5z" fill="currentColor" stroke="none" />, p)
+export const NextIcon = (p: P) => S(<><path d="M5 5v14l10-7z" fill="currentColor" stroke="none" /><path d="M18 5v14" /></>, p)
+export const PrevIcon = (p: P) => S(<><path d="M19 5v14L9 12z" fill="currentColor" stroke="none" /><path d="M6 5v14" /></>, p)
+export const ShuffleIcon = (p: P) => S(<path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3" />, p)
+export const RepeatIcon = (p: P) => S(<path d="M4 11V8a2 2 0 0 1 2-2h13l-3-3M20 13v3a2 2 0 0 1-2 2H5l3 3" />, p)
+export const VolumeIcon = ({ muted, ...p }: P & { muted?: boolean }) =>
+  S(<><path d="M4 9h4l5-4v14l-5-4H4z" />{muted ? <path d="m16 9 5 6M21 9l-5 6" /> : <path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" />}</>, p)

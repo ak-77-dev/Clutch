@@ -75,6 +75,16 @@ function pressFeedback(kind, settings = {}, recording = false) {
   return null
 }
 
+/** The in-game toast after a media hotkey: what's playing now (the backend answers with the new state). */
+function musicFeedback(action, state) {
+  const s = (state && state.sessions && state.sessions[0]) || null
+  if (!s || !s.title) return { title: 'Nothing playing', sub: 'Start Spotify, Apple Music or YouTube Music', tone: 'info', sound: null }
+  const who = [s.artist, s.app_name].filter(Boolean).join(' · ')
+  if (action === 'play_pause') return { title: `${s.status === 'playing' ? '▶' : '⏸'} ${s.title}`, sub: who, tone: 'info', sound: null }
+  const icon = action === 'next' ? '⏭' : action === 'previous' ? '⏮' : '♪'
+  return { title: `${icon} ${s.title}`, sub: who, tone: 'info', sound: null }
+}
+
 /** Desktop notification for a finished session (the overlay is gone by then). */
 function sessionNotification(event) {
   if (event.type !== 'session_end' || event.notify === false) return null
@@ -106,4 +116,4 @@ function goalName(g = {}) {
   )
 }
 
-module.exports = { findPython, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification, hours }
+module.exports = { findPython, parseSSE, overlayFor, pressFeedback, musicFeedback, sessionNotification, eventNotification, hours }

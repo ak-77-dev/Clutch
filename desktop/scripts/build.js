@@ -26,6 +26,8 @@ run(python, [
   '--collect-all', 'imageio_ffmpeg', '--collect-all', 'pyaudiowpatch',
   '--collect-submodules', 'clutch', '--collect-submodules', 'uvicorn', '--collect-submodules', 'rlstats', '--collect-data', 'rlstats',
   '--hidden-import', 'icoextract', '--hidden-import', 'send2trash', '--hidden-import', 'psutil',
+  // music controls: WinRT projections (one native module per namespace) and the Core Audio mixer
+  '--collect-all', 'winrt', '--collect-submodules', 'pycaw', '--collect-submodules', 'comtypes',
   'packaging/clutch_backend.py',
 ], backend)
 

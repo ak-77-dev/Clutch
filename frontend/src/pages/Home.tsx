@@ -10,7 +10,7 @@ import { ReportCard } from '../components/ReportCard'
 import { SearchBar } from '../components/SearchBar'
 import { useDesktop } from '../components/Shell'
 import { desktop, isDesktop, useDesktopEvents } from '../desktop'
-import { fmtHours, monogram } from '../format'
+import { fmtHours, GAME_GLYPH, monogram } from '../format'
 import { useAsync, useGames } from '../hooks'
 import type { MatchSummary } from '../types'
 import { GoalRow } from './Goals'
@@ -23,8 +23,15 @@ const BLURB: Record<string, string> = {
   dota2: 'Heroes, GPM / XPM, last hits and medal history from OpenDota. No key needed.',
   deadlock: 'Heroes, souls, accuracy and rank badges from deadlock-api.com. No key needed.',
   cod: 'K/D, SPM, damage and accuracy. Experimental: needs your own Activision token.',
+  cs2: 'FACEIT matches: ADR, K/D, HS%, multi-kills and your best and worst maps. Free FACEIT key.',
+  tft: 'Placements, top-4 rate, comps and levelling from the Riot API. Uses your Riot key.',
+  pubg: 'Placement, damage, knocks and time alive by map from the official PUBG API.',
+  brawlstars: 'Battle log, trophies, star player rate and brawler pool. Official Supercell API.',
+  clashroyale: 'Crowns, elixir leaked, card levels and your win conditions. Official Supercell API.',
+  osu: 'Plays, accuracy, pp, misses and star ratings from osu! API v2.',
+  chesscom: 'Ratings, accuracy and your best openings as White and Black. No key needed.',
+  lichess: 'Ratings, accuracy, ACPL and blunders from engine analysis. No key needed.',
 }
-const GLYPH: Record<string, string> = { lol: 'LOL', valorant: 'VAL', rocketleague: 'RL', dota2: 'D2', deadlock: 'DL', cod: 'COD' }
 
 export function Home() {
   const { game } = useParams()
@@ -128,7 +135,7 @@ function Dashboard() {
           <div className="track">
             {[...ticker.data, ...ticker.data].map(({ m, game: g }, i) => (
               <span className="item" key={i}>
-                <b style={{ color: games.find((x) => x.id === g)?.accent }}>{GLYPH[g] ?? g}</b>
+                <b style={{ color: games.find((x) => x.id === g)?.accent }}>{GAME_GLYPH[g] ?? g}</b>
                 <span className={m.result === 'win' ? 'w' : 'l'}>{m.result === 'win' ? 'W' : m.result === 'loss' ? 'L' : 'D'}</span>
                 {m.score_line} · {m.character}
                 {m.map ? ` · ${m.map}` : ''}
@@ -196,7 +203,7 @@ function Dashboard() {
                   return (
                     <Link key={g} className="row" to={`/${g}/p/${encodeURIComponent(key)}`} style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
                       <span className="glyph" style={{ '--game': meta?.accent } as React.CSSProperties}>
-                        {GLYPH[g] ?? monogram(g)}
+                        {GAME_GLYPH[g] ?? monogram(g)}
                       </span>
                       <span style={{ fontWeight: 600 }}>{meta?.name ?? g}</span>
                       <span className="muted mono" style={{ marginLeft: 'auto', fontSize: 11 }}>
@@ -331,7 +338,7 @@ export function StatsHub() {
 
       <div className="game-cards">
         {shown.map((g) => (
-          <div className="game-card enter" key={g.id} data-glyph={GLYPH[g.id] ?? monogram(g.name)} style={{ '--game': g.accent } as React.CSSProperties}>
+          <div className="game-card enter" key={g.id} data-glyph={GAME_GLYPH[g.id] ?? monogram(g.name)} style={{ '--game': g.accent } as React.CSSProperties}>
             <h3>{g.name}</h3>
             <p className="muted" style={{ margin: 0, position: 'relative', fontSize: 13 }}>
               {BLURB[g.id]}

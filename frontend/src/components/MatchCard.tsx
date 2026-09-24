@@ -9,7 +9,24 @@ import { Portrait } from './Portrait'
 /** match id -> ids of clips recorded during it (desktop app, linked account only). */
 export const MatchClipsContext = createContext<Record<string, number[]>>({})
 
-function Kda({ m }: { m: MatchSummary }) {
+/** The big number on a match row: K/D/A, Rocket League's G/A/Sv, or the game's lead stat (chess rating, TFT place...). */
+function headlineKey(game: Game, m: MatchSummary): string | null {
+  if (m.metrics.kills !== undefined && m.metrics.deaths !== undefined) return null
+  if (m.metrics.goals !== undefined) return null
+  return game.card_metrics[0] ?? null
+}
+
+function Kda({ m, game }: { m: MatchSummary; game: Game }) {
+  const key = headlineKey(game, m)
+  if (key) {
+    const metric = game.metrics[key]
+    return (
+      <div className="kda">
+        {fmtMetric(metric, m.metrics[key])}
+        <span className="slash"> {metric.short ?? metric.label}</span>
+      </div>
+    )
+  }
   if (m.metrics.kills === undefined) {
     // Rocket League: goals / assists / saves instead of K/D/A
     return (
@@ -49,7 +66,8 @@ export function MatchCard({ game, match, playerKey }: { game: Game; match: Match
     }
   }
 
-  const statKeys = game.card_metrics.filter((k) => !['kills', 'deaths', 'assists', 'goals', 'saves'].includes(k))
+  const headline = headlineKey(game, match)
+  const statKeys = game.card_metrics.filter((k) => k !== headline && !['kills', 'deaths', 'assists', 'goals', 'saves'].includes(k))
   return (
     <article className={`match ${match.result}`}>
       {clipIds?.length ? (
@@ -68,7 +86,7 @@ export function MatchCard({ game, match, playerKey }: { game: Game; match: Match
         </div>
         <Portrait src={match.character_icon} name={match.character} />
         <div>
-          <Kda m={match} />
+          <Kda m={match} game={game} />
           <div className="meta">
             {match.character}
             {match.role ? ` · ${match.role}` : ''}

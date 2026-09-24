@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { bridge, desktop, isDesktop, useDesktopEvents, type Clip, type DesktopEvent, type DesktopStatus, type Settings } from '../desktop'
-import { fmtBytes, fmtHours, monogram } from '../format'
+import { fmtBytes, fmtHours, GAME_GLYPH, monogram } from '../format'
 import { useGames } from '../hooks'
 import { CameraIcon, ClipIcon, ClockIcon, GearIcon, HomeIcon, LibraryIcon, RecIcon, ReportIcon, StatsIcon, TargetIcon, UsersIcon } from './Icons'
 import { Onboarding } from './Onboarding'
@@ -156,7 +156,6 @@ export function Titlebar() {
   )
 }
 
-const GLYPH: Record<string, string> = { lol: 'LOL', valorant: 'VAL', rocketleague: 'RL', dota2: 'D2', deadlock: 'DL', cod: 'COD' }
 
 export function Rail() {
   const games = useGames()
@@ -210,7 +209,7 @@ export function Rail() {
             style={{ '--game': g.accent } as React.CSSProperties}
             title={`${g.name}${g.configured ? '' : ' (demo data — no API key)'}`}
           >
-            <span className="glyph">{GLYPH[g.id] ?? monogram(g.name)}</span>
+            <span className="glyph">{GAME_GLYPH[g.id] ?? monogram(g.name)}</span>
             <span className="label-text">{g.name}</span>
           </NavLink>
         ))}

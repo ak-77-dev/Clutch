@@ -9,7 +9,7 @@ Clutch is a desktop app in the spirit of Blitz.gg and Medal, in one place:
 - **Playtime & sessions.** Every session is tracked automatically: totals, streaks, a 26-week heatmap, and a report card per session (W/L, form vs. usual, MVP game) when the game's account is linked.
 - **Goals & friends.** Daily caps, practice hours, clip counts, win-rate and rank goals. A friends feed built from your friends' public stats profiles.
 - **In game.** A click-through session panel (time, today's record, daily cap) and Discord Rich Presence.
-- **Stats.** Match history, rank climbs and plain-English insights on *what separates your wins from your losses* for League of Legends, Valorant, Rocket League, Dota 2, Deadlock and (experimentally) Call of Duty. Link your accounts and your stats refresh on their own after every session.
+- **Stats.** Match history, rank climbs and plain-English insights on *what separates your wins from your losses* for 14 games: League of Legends, Valorant, Counter-Strike 2 (FACEIT), Rocket League, Dota 2, Deadlock, Teamfight Tactics, PUBG, Brawl Stars, Clash Royale, osu!, Chess.com, Lichess and (experimentally) Call of Duty. Link your accounts and your stats refresh on their own after every session.
 
 ![Clutch home](docs/desktop-home.png)
 
@@ -80,6 +80,13 @@ Paste keys in **Settings → API keys** (they're written to the `.env` next to t
 | Rocket League | `BALLCHASING_API_KEY` | [ballchasing.com/upload](https://ballchasing.com/upload) |
 | Dota 2 | none (optional `OPENDOTA_API_KEY` lifts the 60 req/min cap) | [OpenDota](https://docs.opendota.com). The player needs "Expose Public Match Data" on in the Dota client. |
 | Deadlock | none | [deadlock-api.com](https://api.deadlock-api.com/docs) |
+| Teamfight Tactics | `RIOT_API_KEY` (the same key) | Top 4 counts as a win; the "comp" is your strongest trait. |
+| Counter-Strike 2 | `FACEIT_API_KEY` | [developers.faceit.com](https://developers.faceit.com) → an app → a *server-side* key. Valve publishes no CS2 match history, so this is FACEIT matches. |
+| PUBG | `PUBG_API_KEY` (+ `PUBG_SHARD`, default `steam`) | [developer.pubg.com](https://developer.pubg.com). Top 10 counts as a win; the API keeps 14 days of matches. |
+| Brawl Stars | `BRAWLSTARS_API_KEY` | [developer.brawlstars.com](https://developer.brawlstars.com). Supercell keys are locked to the IPs you list, so use your home IP. The battle log holds 25 battles; syncing after each session builds the history. |
+| Clash Royale | `CLASHROYALE_API_KEY` | [developer.clashroyale.com](https://developer.clashroyale.com). Same IP rule. |
+| osu! | `OSU_CLIENT_ID` + `OSU_CLIENT_SECRET` | An OAuth app at [osu.ppy.sh/home/account/edit](https://osu.ppy.sh/home/account/edit). Recent plays cover 24 hours, so history grows as Clutch syncs; the first sync adds your top 100. |
+| Chess.com, Lichess | none | Public APIs. Openings are the "characters": the pool view shows which ones win for you. |
 | Call of Duty (experimental) | `COD_SSO_TOKEN` (+ `COD_TITLE`, default `bo7`) | Your own `ACT_SSO_COOKIE` from callofduty.com. Activision has no public API. See below. |
 
 Optional extras, also in Settings: a free [SteamGridDB](https://www.steamgriddb.com/profile/preferences/api) key for cover art on non-Steam games, and a Discord application ID for Rich Presence (create one at [discord.com/developers](https://discord.com/developers/applications) and name it "Clutch": Discord shows "Playing Clutch").
@@ -154,7 +161,7 @@ The Electron window runs sandboxed with context isolation. Links to other sites 
 
 ### Stats engine
 
-- **One analytics engine for every game.** Adapters emit a normalized `Match`, and each game declares its metrics in a `GameMeta`: labels, formats, headline KPIs, and the process stats to test against win rate. Neither the analytics nor the UI have per-game code, so Dota 2, Deadlock and CoD were each added in about 250 lines.
+- **One analytics engine for every game.** Adapters emit a normalized `Match`, and each game declares its metrics in a `GameMeta`: labels, formats, headline KPIs, and the process stats to test against win rate. Neither the analytics nor the UI have per-game code, so each game is one adapter file (about 150–300 lines) plus a demo generator. Win factors only use stats you control: a game's own outcome measures (TFT rounds survived, PUBG time alive, chess game length) are left out so insights don't just restate the result.
 - **Raw-first storage.** Upstream JSON is stored and parsed on read, so parser fixes apply to all history, and sync never re-downloads a match. Adapters keep only what they parse: a Deadlock match is ~1.7 MB upstream and ~5 KB stored.
 - **Respectful API usage.** A multi-window sliding rate limiter (Riot's 20/s *and* 100/2 min). 429s honor `Retry-After` or HenrikDev's `x-ratelimit-reset`. Upstream failures map to clean error messages.
 - **Honest analytics.** Remakes and kill-target modes (Deathmatch) are excluded from per-round stats. Insights need a minimum sample, and win factors split at the player's *own* median.
@@ -162,7 +169,7 @@ The Electron window runs sandboxed with context isolation. Links to other sites 
 ## Development
 
 ```bash
-cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 86 tests
+cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 114 tests
 cd frontend && npm test && npm run typecheck && npm run build
 cd desktop  && npm run check                                                  # syntax + node:test
 ```

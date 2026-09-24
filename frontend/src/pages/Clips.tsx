@@ -115,7 +115,7 @@ function ClipsInner() {
   const stats = clips.data?.stats
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="clips">
         <div>
           <div className="kicker bare">
             <b>02</b> Media hub

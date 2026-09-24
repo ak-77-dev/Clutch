@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { CountUp } from '../components/CountUp'
 import { ReportCard } from '../components/ReportCard'
 import { desktop, useDesktopEvents } from '../desktop'
 import { fmtHours } from '../format'
@@ -35,7 +36,7 @@ function SessionsInner() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="sessions">
         <div>
           <div className="kicker bare">
             <b>04</b> Sessions
@@ -54,7 +55,9 @@ function SessionsInner() {
       <div className="stat-row enter" style={{ marginBottom: 26 }}>
         <div className="stat hot">
           <div className="k">Sessions · 7 days</div>
-          <div className="v">{week.sessions}</div>
+          <div className="v">
+            <CountUp value={week.sessions} />
+          </div>
         </div>
         <div className="stat">
           <div className="k">Time</div>
@@ -68,7 +71,9 @@ function SessionsInner() {
         </div>
         <div className="stat">
           <div className="k">Clips</div>
-          <div className="v">{week.clips}</div>
+          <div className="v">
+            <CountUp value={week.clips} />
+          </div>
           <div className="d">longest session {fmtHours(week.longest)}</div>
         </div>
       </div>

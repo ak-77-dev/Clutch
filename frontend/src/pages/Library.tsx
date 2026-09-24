@@ -80,7 +80,7 @@ function LibraryInner() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="library">
         <div>
           <div className="kicker bare">
             <b>01</b> Library · {games.length} games · {sources.length} launchers

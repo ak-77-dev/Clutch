@@ -6,7 +6,7 @@ const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification } = require('./lib')
+const { findPython, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification } = require('./lib')
 const { DiscordPresence, activityFor } = require('./discord')
 
 const ROOT = path.resolve(__dirname, '..')
@@ -50,7 +50,7 @@ async function call(p, init = {}) {
 
 /** How to run the backend: the bundled exe in an installed build, the repo's venv in development. */
 function backendCommand() {
-  const args = ['serve', '--desktop', '--port', String(port)]
+  const args = ['serve', '--desktop', '--port', '0'] // the backend binds a free port and reports it
   if (app.isPackaged) {
     const home = path.join(app.getPath('appData'), 'Clutch') // API keys (.env) and the stats database live here
     fs.mkdirSync(home, { recursive: true })
@@ -66,23 +66,28 @@ function backendCommand() {
 
 const ALREADY_RUNNING = 75 // the backend's exit code when another backend owns the data folder
 const LOG_PATH = () => path.join(app.getPath('userData'), 'backend.log')
+const DATA_DIR = () => process.env.CLUTCH_HOME || path.join(app.getPath('appData'), 'Clutch')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+let backendPid = null
+let adopted = false
 
 /**
  * Start the backend and wait until it answers with our token.
  *
- * The backend holds a lock on its data folder, so a second copy exits with ALREADY_RUNNING
- * instead of fighting over the port. That covers two cases seen on Windows:
- *  - a twin of our own child (same command line, same token) came up first, e.g. on the
- *    first launch of a freshly installed build: we adopt it, since it answers with our token;
- *  - a backend left over from an older launch (another token): we stop it and start ours.
+ * The backend binds its own port and prints `CLUTCH_PORT <n>`: choosing a free port here and
+ * polling it while a slow first launch warms up raced on Windows (a connect to a port nobody
+ * listens on can bind to that very port, and the backend then can't).
+ *
+ * The backend also locks its data folder, so a second copy exits with ALREADY_RUNNING. Then
+ * `backend.pid` names the owner: if it answers with our token we adopt it, otherwise it's a
+ * leftover from an earlier launch, so we stop it and start ours.
  */
 async function startBackend() {
   const log = fs.createWriteStream(LOG_PATH(), { flags: 'a' })
   for (let attempt = 1; attempt <= 2; attempt++) {
-    port = await freePort()
     const run = backendCommand()
-    log.write(`\n--- ${new Date().toISOString()} starting ${run.cmd} on ${port}\n`)
+    log.write(`\n--- ${new Date().toISOString()} starting ${run.cmd}\n`)
     const child = spawn(run.cmd, run.args, {
       cwd: run.cwd, // the backend reads its .env (API keys) and stats database from here
       env: { ...process.env, ...run.env, CLUTCH_TOKEN: TOKEN, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
@@ -93,32 +98,69 @@ async function startBackend() {
     child.stderr.pipe(log, { end: false })
     child.on('exit', (code) => {
       if (backend === child) backend = null
-      if (quitting || code === ALREADY_RUNNING || !backendPid) return
-      if (!adopted) fatal(new Error(`Clutch's local service stopped (exit ${code}). See ${LOG_PATH()}`))
+      if (quitting || code === ALREADY_RUNNING || !backendPid || adopted) return
+      fatal(new Error(`Clutch's local service stopped (exit ${code}). See ${LOG_PATH()}`))
     })
 
-    const health = await waitForHealth(child)
-    if (health && (await tokenAccepted())) {
-      backendPid = health.pid
-      if (child.exitCode === ALREADY_RUNNING) adopt(health.pid, log)
-      return
+    const reported = await reportedPort(child)
+    if (reported) {
+      port = reported
+      const health = await waitForHealth(() => child.exitCode === null)
+      if (health && (await tokenAccepted())) {
+        backendPid = health.pid
+        return
+      }
+      break // ours started but never became healthy: the log says why
     }
     if (child.exitCode !== ALREADY_RUNNING) break
-    stopStaleBackend(log)
+
+    const owner = readPidFile()
+    if (owner) {
+      port = owner.port
+      const health = await waitForHealth(() => processAlive(owner.pid), 8000)
+      if (health && (await tokenAccepted())) {
+        backendPid = health.pid
+        adopt(health.pid, log)
+        return
+      }
+      log.write(`--- stopping a Clutch backend left over from an earlier launch (pid ${owner.pid})\n`)
+      try {
+        process.kill(owner.pid)
+      } catch {
+        /* already gone */
+      }
+    }
     await sleep(1500)
   }
   throw new Error(`Clutch’s local service didn’t start. See ${LOG_PATH()}`)
 }
 
-let backendPid = null
-let adopted = false
+/** Resolves with the port the backend printed, or null if it exits first (or takes over 90 s). */
+function reportedPort(child) {
+  return new Promise((resolve) => {
+    let text = ''
+    const done = (value) => {
+      clearTimeout(timer)
+      child.stdout.off('data', onData)
+      child.off('exit', onExit)
+      resolve(value)
+    }
+    const onData = (chunk) => {
+      text += chunk
+      const m = /CLUTCH_PORT (\d+)/.exec(text)
+      if (m) done(Number(m[1]))
+    }
+    const onExit = () => done(null)
+    const timer = setTimeout(() => done(null), 90_000) // a first launch can be slow while antivirus scans the new exe
+    child.stdout.on('data', onData)
+    child.on('exit', onExit)
+  })
+}
 
-/** Poll /api/health until a desktop backend answers (ours, or a twin on our port). */
-async function waitForHealth(child) {
-  let deadline = Date.now() + 45_000
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null && child.exitCode !== ALREADY_RUNNING) return null // crashed: the log says why
-    if (child.exitCode === ALREADY_RUNNING) deadline = Math.min(deadline, Date.now() + 8000) // give a twin a moment
+/** Poll /api/health on `port` until a desktop backend answers, while `alive()` holds. */
+async function waitForHealth(alive, timeoutMs = 45_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline && alive()) {
     try {
       const res = await fetch(api('/api/health'))
       const body = res.ok ? await res.json() : null
@@ -140,31 +182,33 @@ async function tokenAccepted() {
   }
 }
 
-/** Our child lost the lock to a twin that serves us; watch it like our own. */
-function adopt(pid, log) {
-  adopted = true
-  log.write(`--- adopted backend pid ${pid} on ${port} (a twin took the data-folder lock)\n`)
-  const timer = setInterval(() => {
-    try {
-      process.kill(pid, 0)
-    } catch {
-      clearInterval(timer)
-      if (!quitting) fatal(new Error(`Clutch's local service stopped. See ${LOG_PATH()}`))
-    }
-  }, 5000)
+function readPidFile() {
+  try {
+    const [pid, p] = fs.readFileSync(path.join(DATA_DIR(), 'backend.pid'), 'utf8').trim().split(/\s+/).map(Number)
+    return pid && p && pid !== process.pid ? { pid, port: p } : null
+  } catch {
+    return null
+  }
 }
 
-function stopStaleBackend(log) {
-  const home = process.env.CLUTCH_HOME || path.join(app.getPath('appData'), 'Clutch')
+function processAlive(pid) {
   try {
-    const [pid] = fs.readFileSync(path.join(home, 'backend.pid'), 'utf8').trim().split(/\s+/).map(Number)
-    if (pid && pid !== process.pid) {
-      log.write(`--- stopping a Clutch backend left over from an earlier launch (pid ${pid})\n`)
-      process.kill(pid)
-    }
+    process.kill(pid, 0)
+    return true
   } catch {
-    /* no pid file, or it's already gone */
+    return false
   }
+}
+
+/** Another backend owns the data folder and answers with our token: use it, and watch it like our own. */
+function adopt(pid, log) {
+  adopted = true
+  log.write(`--- using the Clutch backend already running (pid ${pid}, port ${port})\n`)
+  const timer = setInterval(() => {
+    if (processAlive(pid)) return
+    clearInterval(timer)
+    if (!quitting) fatal(new Error(`Clutch's local service stopped. See ${LOG_PATH()}`))
+  }, 5000)
 }
 
 function fatal(err) {

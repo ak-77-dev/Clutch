@@ -1,7 +1,6 @@
 // Pure helpers for the Electron main process (no Electron imports, so `node --test` covers them).
 'use strict'
 const fs = require('node:fs')
-const net = require('node:net')
 const path = require('node:path')
 
 /** The Python that runs the Clutch backend: $CLUTCH_PYTHON, the backend's venv, or python on PATH. */
@@ -9,18 +8,6 @@ function findPython(backendDir, env = process.env, exists = fs.existsSync) {
   if (env.CLUTCH_PYTHON) return env.CLUTCH_PYTHON
   const candidates = [path.join(backendDir, '.venv', 'Scripts', 'python.exe'), path.join(backendDir, '.venv', 'bin', 'python')]
   return candidates.find((p) => exists(p)) ?? 'python'
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer()
-    srv.unref()
-    srv.on('error', reject)
-    srv.listen(0, '127.0.0.1', () => {
-      const { port } = srv.address()
-      srv.close(() => resolve(port))
-    })
-  })
 }
 
 /** Split a Server-Sent Events buffer into complete events and the unfinished remainder. */
@@ -119,4 +106,4 @@ function goalName(g = {}) {
   )
 }
 
-module.exports = { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification, hours }
+module.exports = { findPython, parseSSE, overlayFor, pressFeedback, sessionNotification, eventNotification, hours }

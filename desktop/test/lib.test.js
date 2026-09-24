@@ -2,18 +2,13 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('node:path')
-const { findPython, freePort, parseSSE, overlayFor, pressFeedback, sessionNotification, hours } = require('../lib')
+const { findPython, parseSSE, overlayFor, pressFeedback, sessionNotification, hours } = require('../lib')
 
 test('findPython prefers the env override, then the backend venv', () => {
   assert.equal(findPython('/b', { CLUTCH_PYTHON: '/custom/python' }), '/custom/python')
   const venv = path.join('/b', '.venv', 'Scripts', 'python.exe')
   assert.equal(findPython('/b', {}, (p) => p === venv), venv)
   assert.equal(findPython('/b', {}, () => false), 'python')
-})
-
-test('freePort returns a usable port', async () => {
-  const port = await freePort()
-  assert.ok(port > 0 && port < 65536)
 })
 
 test('parseSSE splits complete events and keeps the remainder', () => {

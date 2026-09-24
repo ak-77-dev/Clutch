@@ -277,7 +277,7 @@ function SettingsInner() {
   const estimate = estimateSize(s, display?.height ?? 1080)
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="settings">
         <div>
           <div className="kicker bare">
             <b>07</b> Settings

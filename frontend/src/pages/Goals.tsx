@@ -142,7 +142,7 @@ function GoalsInner() {
   const done = list.filter((g) => g.progress.state === 'done').length
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="goals">
         <div>
           <div className="kicker bare">
             <b>05</b> Goals

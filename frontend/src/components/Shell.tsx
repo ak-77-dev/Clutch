@@ -143,7 +143,13 @@ export function Titlebar() {
         </span>
       ) : b?.active ? (
         <span className="kicker bare">
-          <span className="rec-dot buffer" /> Buffer {b.buffer_seconds}s
+          <span className="eq" aria-hidden>
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>{' '}
+          Buffer {b.buffer_seconds}s
         </span>
       ) : null}
     </div>
@@ -244,7 +250,7 @@ function CaptureDock() {
         ? 'arms when a game starts'
         : 'toggle to start'
   return (
-    <div className="dock">
+    <div className={`dock ${b?.recording ? 'recording' : b?.active ? 'armed' : ''}`}>
       <div className="dock-status">
         <span className={`rec-dot ${b?.recording ? 'on' : b?.active ? 'buffer' : ''}`} />
         <div style={{ flex: 1, minWidth: 0 }}>

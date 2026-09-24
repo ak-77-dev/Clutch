@@ -537,7 +537,7 @@ input[type="range"] { accent-color: var(--volt); width: 100%; }
 .report-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
 .report { position: relative; display: grid; gap: 14px; padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); border-top: 2px solid var(--game); clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%); }
 .report.compact { padding: 0; background: none; border: 0; clip-path: none; gap: 12px; }
-.report header { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; }
+.report header { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
 .report .gicon { width: 34px; height: 34px; object-fit: contain; }
 .report .name { font: 800 22px/1 var(--display); text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .report .when { font: 400 11px var(--mono); color: var(--muted); margin-top: 4px; }

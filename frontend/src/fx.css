@@ -1,0 +1,220 @@
+/*
+ * FX layer: motion and depth on top of the base theme (styles.css).
+ * Same palette and shapes; this file only adds light, movement and feedback.
+ * Pointer-driven bits (the card spotlight, cover tilt) are wired in fx.ts.
+ */
+
+/* ── ambient ─────────────────────────────────────────────────────────────── */
+/* A slow volt/blue aurora behind every page, plus a vignette that pulls focus to the middle. */
+.main { position: relative; isolation: isolate; }
+.main::before {
+  content: ''; position: fixed; inset: var(--titlebar) 0 0 var(--rail); z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(38% 42% at 88% 4%, rgba(212, 255, 58, .075), transparent 70%),
+    radial-gradient(34% 40% at 8% 96%, rgba(61, 139, 255, .055), transparent 70%),
+    radial-gradient(28% 30% at 55% 55%, rgba(212, 255, 58, .025), transparent 70%);
+  animation: aurora 26s ease-in-out infinite alternate;
+}
+@keyframes aurora { to { transform: translate3d(-4%, 3%, 0) scale(1.1); } }
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9998;
+  background: radial-gradient(120% 90% at 50% 40%, transparent 60%, rgba(0, 0, 0, .45));
+}
+::-webkit-scrollbar-thumb:hover { background: #3b3f2a; }
+:focus-visible { box-shadow: 0 0 0 5px rgba(212, 255, 58, .14); }
+
+/* ── headlines ───────────────────────────────────────────────────────────── */
+/* Wipe-in led by a volt bar, like a broadcast graphic landing. */
+.page-head h1, .hero h1, .now-card h2, .game-hero h1, .onboard-body h1, .profile-head h1 { position: relative; animation: wipe .75s cubic-bezier(.7, 0, .2, 1) both; }
+.page-head h1::after, .hero h1::after, .game-hero h1::after, .onboard-body h1::after {
+  content: ''; position: absolute; top: 4%; bottom: 4%; left: -14px; width: 12px; background: var(--volt);
+  animation: wipe-bar .75s cubic-bezier(.7, 0, .2, 1) both; pointer-events: none;
+}
+@keyframes wipe { from { clip-path: inset(-40% 100% -40% -40%); } to { clip-path: inset(-40% -40% -40% -40%); } }
+@keyframes wipe-bar { 0% { left: -14px; opacity: 1; } 85% { left: 100%; opacity: 1; } 100% { left: 100%; opacity: 0; } }
+.hero h1 em, .page-head h1 em, .onboard-body h1 em { text-shadow: 0 0 42px rgba(212, 255, 58, .32); }
+
+/* A giant outlined echo of the page name behind the title. */
+.page-head { position: relative; }
+.page-head[data-echo]::before {
+  content: attr(data-echo); position: absolute; right: 0; top: -34px; z-index: -1; pointer-events: none; white-space: nowrap;
+  font: 900 clamp(90px, 13vw, 190px)/.8 var(--display); text-transform: uppercase; letter-spacing: .01em;
+  color: transparent; -webkit-text-stroke: 1px rgba(242, 239, 234, .065);
+  animation: echo-in 1.1s .15s cubic-bezier(.2, .7, .2, 1) both;
+}
+@keyframes echo-in { from { opacity: 0; transform: translateX(60px); } }
+/* The section number gets a blinking cursor. */
+.page-head .kicker b::after { content: '_'; margin-left: 1px; animation: cursor 1.1s steps(2) infinite; }
+@keyframes cursor { 50% { opacity: 0; } }
+.kicker:not(.bare)::after { transform-origin: left; animation: grow .9s .15s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes grow { from { transform: scaleX(0); } }
+
+/* ── hero ────────────────────────────────────────────────────────────────── */
+.hero::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(212, 255, 58, .7) 50%, transparent);
+  box-shadow: 0 0 18px rgba(212, 255, 58, .5); animation: scan 7s cubic-bezier(.45, 0, .55, 1) infinite;
+}
+@keyframes scan { 0% { top: 0; opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+.now-card img.bg, .game-hero .bg { animation: kenburns 22s ease-in-out infinite alternate; }
+@keyframes kenburns { from { transform: scale(1.02); } to { transform: scale(1.12) translate3d(-1.5%, -1%, 0); } }
+.btn.big.primary::after { animation: sheen 4.5s 1.4s cubic-bezier(.2, .7, .2, 1) infinite; }
+
+/* ── surfaces ────────────────────────────────────────────────────────────── */
+/* A soft spotlight that follows the cursor (fx.ts sets --mx / --my). */
+.card, .report, .friend, .stat-row, .goal-form, .onboard-card, .now-card, .game-card { --mx: -999px; --my: -999px; }
+.card, .report, .friend, .stat-row, .game-card { background-image: radial-gradient(420px circle at var(--mx) var(--my), rgba(212, 255, 58, .1), transparent 50%); }
+.card, .report, .friend, .game-card { transition: border-color .2s, transform .2s cubic-bezier(.2, .7, .2, 1); }
+.card.lit, .friend.lit, .game-card.lit { border-color: rgba(212, 255, 58, .2); }
+
+/* Everything in a grid lands in sequence. */
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > * {
+  animation: pop .55s cubic-bezier(.2, .7, .2, 1) both;
+}
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(2) { animation-delay: .035s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(3) { animation-delay: .07s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(4) { animation-delay: .105s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(5) { animation-delay: .14s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(6) { animation-delay: .175s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(7) { animation-delay: .21s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(8) { animation-delay: .245s; }
+:is(.clip-grid, .library-grid, .report-grid, .shelf, .goals, .feed, .game-cards, .settings, .matches, .link-list, .stack, .bars, .session-list, .kind-pick, .big-choice, .quality-pick) > :nth-child(n + 9) { animation-delay: .28s; }
+@keyframes pop { from { opacity: 0; transform: translateY(16px) scale(.985); } }
+
+/* ── numbers ─────────────────────────────────────────────────────────────── */
+.stat .v, .tile .v, .report-stats .v { animation: num-in .7s .1s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes num-in { from { opacity: 0; filter: blur(6px); transform: translateY(8px); } }
+.stat.hot .v { text-shadow: 0 0 34px rgba(212, 255, 58, .35); }
+.stat { position: relative; transition: background .2s; }
+.stat::after { content: ''; position: absolute; left: 18px; right: 18px; bottom: 0; height: 2px; background: var(--volt); transform: scaleX(0); transform-origin: left; transition: transform .35s cubic-bezier(.2, .7, .2, 1); }
+.stat:hover::after { transform: scaleX(1); }
+
+/* ── bars fill in ────────────────────────────────────────────────────────── */
+.goal-bar i, .bar-row .track i, .wr-bar .bar i { transform-origin: left; animation: fill 1.1s .15s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes fill { from { transform: scaleX(0); } }
+.goal.ok .goal-bar i {
+  background-image: repeating-linear-gradient(-45deg, rgba(0, 0, 0, .22) 0 6px, transparent 6px 12px); background-size: 17px 17px;
+  animation: fill 1.1s .15s cubic-bezier(.2, .7, .2, 1) both, stripes .9s linear infinite;
+}
+@keyframes stripes { to { background-position: 17px 0; } }
+.goal.done .goal-bar i { box-shadow: 0 0 12px rgba(67, 209, 122, .6); }
+.goal.over .goal-bar i { animation: fill 1.1s .15s cubic-bezier(.2, .7, .2, 1) both, danger 1.2s ease-in-out infinite; }
+@keyframes danger { 50% { filter: brightness(1.4); } }
+.heatmap i { transition: transform .12s; }
+.heatmap i:hover { transform: scale(1.35); outline: 1px solid var(--text); position: relative; z-index: 1; }
+
+/* ── controls ────────────────────────────────────────────────────────────── */
+/* Primary buttons catch the light on hover. */
+.btn.primary { position: relative; overflow: hidden; }
+.btn.primary::after {
+  content: ''; position: absolute; top: -10%; bottom: -10%; left: -70%; width: 45%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .6), transparent); transform: skewX(-20deg);
+}
+.btn.primary:hover::after { animation: sheen .7s cubic-bezier(.2, .7, .2, 1); }
+@keyframes sheen { from { left: -70%; } to { left: 140%; } }
+.switch[aria-checked="true"] { box-shadow: 0 0 14px rgba(212, 255, 58, .4); }
+.fchip, .seg button, .kind-pick button { transition: background .15s, color .15s, border-color .15s; }
+.hotkey { transition: border-color .15s, color .15s; }
+.hotkey:hover { border-color: rgba(212, 255, 58, .5); }
+
+/* ── rail & chrome ───────────────────────────────────────────────────────── */
+.nav-item svg { transition: transform .18s cubic-bezier(.2, .7, .2, 1), color .18s; }
+.nav-item:hover svg { transform: translateX(2px); color: var(--volt); }
+.nav-item.active svg { color: var(--volt); }
+.nav-item.active::before { box-shadow: 0 0 14px var(--volt), 0 0 4px var(--volt); animation: bar-in .3s cubic-bezier(.2, .7, .2, 1); }
+@keyframes bar-in { from { transform: scaleY(0); } }
+.nav-item:hover .glyph { filter: brightness(1.35); }
+.rail-brand svg { transition: transform .35s cubic-bezier(.2, .7, .2, 1); }
+.rail-brand:hover svg { transform: rotate(-6deg) scale(1.08); }
+.nav-item .live { animation: live 1.6s ease-in-out infinite; }
+@keyframes live { 50% { opacity: .35; } }
+
+/* Title bar: a little equalizer while the replay buffer listens. */
+.eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; vertical-align: -1px; }
+.eq i { width: 2px; height: 3px; background: var(--volt); animation: eq 1.1s ease-in-out infinite; }
+.eq i:nth-child(2) { animation-delay: -.3s; } .eq i:nth-child(3) { animation-delay: -.6s; } .eq i:nth-child(4) { animation-delay: -.15s; }
+@keyframes eq { 0%, 100% { height: 3px; } 50% { height: 10px; } }
+
+/* The clip button looks charged while the buffer is armed; REC throbs while recording. */
+.dock.armed .dock-btn.hot { background: linear-gradient(110deg, var(--volt) 38%, #f3ffc4 50%, var(--volt) 62%) 0 0 / 260% 100%; animation: charged 2.8s linear infinite; }
+@keyframes charged { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+.dock.recording .dock-btn.rec { animation: throb 1.2s ease-in-out infinite; }
+@keyframes throb { 50% { filter: brightness(1.25); } }
+
+/* ── game tiles: 3D tilt + glare ─────────────────────────────────────────── */
+.gtile { perspective: 900px; }
+.gtile .tilt { position: relative; display: block; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .45s cubic-bezier(.2, .7, .2, 1), filter .3s; will-change: transform; }
+.gtile:hover .tilt { transition-duration: .09s, .3s; filter: drop-shadow(0 22px 26px rgba(0, 0, 0, .65)); }
+.gtile .glare {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .25s; mix-blend-mode: soft-light;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  background: radial-gradient(70% 55% at var(--gx, 50%) var(--gy, 0%), rgba(255, 255, 255, .55), transparent 65%);
+}
+.gtile:hover .glare { opacity: 1; }
+
+/* ── clip tiles ──────────────────────────────────────────────────────────── */
+.ctile .thumb img { transition: transform .5s cubic-bezier(.2, .7, .2, 1), filter .3s; }
+.ctile:hover .thumb img { transform: scale(1.06); filter: brightness(1.08) saturate(1.1); }
+.ctile .thumb::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity .2s;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 3px);
+  box-shadow: inset 0 0 0 1px rgba(212, 255, 58, .45), inset 0 -40px 40px -20px rgba(0, 0, 0, .6);
+}
+.ctile:hover .thumb::after { opacity: 1; }
+.ctile .ctitle { transition: color .15s; }
+.ctile:hover .ctitle { color: var(--volt); }
+
+/* ── cards with character ────────────────────────────────────────────────── */
+.report:not(.compact):hover { transform: translateY(-3px); }
+.report:not(.compact)::before {
+  content: ''; position: absolute; top: -2px; left: 0; width: 34%; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, #fff, transparent); opacity: .7; animation: edge 4s ease-in-out infinite;
+}
+@keyframes edge { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(300%); } }
+.report .grade { animation: stamp .5s .35s cubic-bezier(.3, 1.6, .5, 1) both; }
+.report .grade.up { text-shadow: 0 0 20px rgba(67, 209, 122, .45); }
+@keyframes stamp { from { opacity: 0; transform: scale(1.6) rotate(-8deg); } }
+.friend:hover { transform: translateX(3px); }
+.match { transition: transform .15s cubic-bezier(.2, .7, .2, 1), border-color .15s; }
+.match:hover { transform: translateX(3px); }
+.feed-item { transition: padding-left .18s cubic-bezier(.2, .7, .2, 1), background .15s; }
+.feed-item:hover { padding-left: 16px; }
+.game-card:hover { transform: translateY(-3px); }
+.game-card::before { transition: transform .5s cubic-bezier(.2, .7, .2, 1), color .3s; }
+.game-card:hover::before { transform: translate(-8px, -6px) scale(1.06); color: color-mix(in srgb, var(--game) 24%, transparent); }
+
+/* ── toasts: a countdown line, and they slide in from the side ───────────── */
+.toast { position: relative; overflow: hidden; animation: toast-in .35s cubic-bezier(.2, .9, .2, 1.15); }
+.toast::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--volt); opacity: .75; transform-origin: left; animation: countdown 4.8s linear forwards; }
+.toast.error::after { background: var(--loss); }
+@keyframes toast-in { from { opacity: 0; transform: translateX(40px) skewX(-6deg); } }
+@keyframes countdown { to { transform: scaleX(0); } }
+
+/* ── loading ─────────────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(100deg, var(--panel) 30%, color-mix(in srgb, var(--volt) 6%, var(--panel-2)) 50%, var(--panel) 70%);
+  background-size: 250% 100%; animation: shimmer 1.3s linear infinite;
+}
+
+/* ── overlays ────────────────────────────────────────────────────────────── */
+.viewer-stage video, .viewer-stage img.shot { animation: zoom-in .35s cubic-bezier(.2, .8, .2, 1); }
+@keyframes zoom-in { from { opacity: 0; transform: scale(.96); } }
+.timeline .sel { box-shadow: 0 0 22px rgba(212, 255, 58, .18) inset; }
+.onboard::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 56px 56px, linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 56px 56px;
+  mask-image: radial-gradient(55% 60% at 50% 50%, #000, transparent); animation: grid-drift 14s linear infinite;
+}
+@keyframes grid-drift { to { background-position: 56px 56px, 56px 56px; } }
+.onboard-card { position: relative; z-index: 1; animation: card-in .5s cubic-bezier(.2, .8, .2, 1); }
+@keyframes card-in { from { opacity: 0; transform: translateY(18px) scale(.97); } }
+.steps li.on span { box-shadow: 0 0 14px rgba(212, 255, 58, .45); }
+.pick-bar .n { text-shadow: 0 0 24px rgba(212, 255, 58, .5); }
+
+@media (max-width: 760px) {
+  .main::before { inset: 0; }
+  .page-head[data-echo]::before { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

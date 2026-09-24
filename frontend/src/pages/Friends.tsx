@@ -55,7 +55,7 @@ function FriendsInner() {
   const items = feed.data?.items ?? []
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="squad">
         <div>
           <div className="kicker bare">
             <b>06</b> Friends

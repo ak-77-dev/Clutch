@@ -35,8 +35,6 @@ def main(argv: list[str] | None = None) -> int:
         if lock is None:
             print("Another Clutch desktop backend is already running for this data folder.", file=sys.stderr, flush=True)
             return ALREADY_RUNNING
-        # Who holds the lock (the lock file itself can't be read while locked on Windows).
-        (data_dir() / "backend.pid").write_text(f"{os.getpid()} {args.port}", encoding="utf-8")
         if not os.environ.get("CLUTCH_TOKEN"):
             import secrets
 
@@ -44,6 +42,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Desktop API token (send as X-Clutch-Token): {os.environ['CLUTCH_TOKEN']}", flush=True)
     import uvicorn
 
+    if args.port == 0 and not args.reload:
+        # Bind here and report the port. Picking a "free" port in the parent and polling it
+        # races on Windows: a health check against a port nobody listens on yet can connect
+        # to itself (same source and destination port) and steal it, so the bind fails.
+        import socket
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1" if args.host == "localhost" else args.host, 0))
+        sock.listen(128)
+        port = sock.getsockname()[1]
+        if args.desktop:
+            # Who holds the lock (the lock file itself can't be read while locked on Windows).
+            (data_dir() / "backend.pid").write_text(f"{os.getpid()} {port}", encoding="utf-8")
+        print(f"CLUTCH_PORT {port}", flush=True)
+        server = uvicorn.Server(uvicorn.Config("clutch.app:create_app", factory=True, host=args.host, port=port))
+        server.run(sockets=[sock])
+        return 0
+    if args.desktop:
+        (data_dir() / "backend.pid").write_text(f"{os.getpid()} {args.port}", encoding="utf-8")
     uvicorn.run("clutch.app:create_app", factory=True, host=args.host, port=args.port, reload=args.reload)
     return 0
 

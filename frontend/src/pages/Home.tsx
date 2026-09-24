@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { ClipTile } from '../components/ClipTile'
+import { CountUp } from '../components/CountUp'
 import { GameTile } from '../components/GameTile'
 import { ClipIcon, PlayIcon } from '../components/Icons'
 import { Portrait } from '../components/Portrait'
@@ -9,7 +10,7 @@ import { ReportCard } from '../components/ReportCard'
 import { SearchBar } from '../components/SearchBar'
 import { useDesktop } from '../components/Shell'
 import { desktop, isDesktop, useDesktopEvents } from '../desktop'
-import { fmtHours, hoursNumber, monogram } from '../format'
+import { fmtHours, monogram } from '../format'
 import { useAsync, useGames } from '../hooks'
 import type { MatchSummary } from '../types'
 import { GoalRow } from './Goals'
@@ -154,17 +155,21 @@ function Dashboard() {
         <div className="stat hot">
           <div className="k">Played this week</div>
           <div className="v">
-            {hoursNumber(week)}
+            <CountUp value={week / 3600} decimals={week >= 360_000 ? 0 : 1} />
             <small>h</small>
           </div>
         </div>
         <div className="stat">
           <div className="k">Clips this week</div>
-          <div className="v">{weekClips}</div>
+          <div className="v">
+            <CountUp value={weekClips} />
+          </div>
         </div>
         <div className="stat">
           <div className="k">Library</div>
-          <div className="v">{lib.length}</div>
+          <div className="v">
+            <CountUp value={lib.length} />
+          </div>
           <div className="d">installed games</div>
         </div>
         <div className="stat">

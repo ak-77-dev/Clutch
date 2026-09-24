@@ -63,7 +63,7 @@ function PlaytimeInner() {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head" data-echo="playtime">
         <div>
           <div className="kicker bare">
             <b>03</b> Playtime · tracked automatically

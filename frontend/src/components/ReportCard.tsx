@@ -18,7 +18,7 @@ export function ReportCard({ report, compact = false }: { report: Report; compac
   return (
     <article className={`report ${compact ? 'compact' : ''}`} style={{ '--game': meta?.accent ?? 'var(--volt)' } as React.CSSProperties}>
       <header>
-        <img className="gicon" src={desktop.iconUrl(report.game_id)} alt="" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
+        <img className="gicon" src={desktop.iconUrl(report.game_id)} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />
         <div style={{ minWidth: 0 }}>
           <div className="name">{report.game_name}</div>
           <div className="when">

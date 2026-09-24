@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { desktop, type LibraryGame } from '../desktop'
+import { tiltHandlers } from '../fx'
 import { fmtHours } from '../format'
 import { PlayIcon } from './Icons'
 
@@ -38,9 +39,10 @@ export function Cover({ game }: { game: LibraryGame }) {
 
 export function GameTile({ game, onLaunch }: { game: LibraryGame; onLaunch: (g: LibraryGame) => void }) {
   return (
-    <div className="gtile brackets">
-      <Link to={`/library/${encodeURIComponent(game.id)}`} aria-label={game.name}>
+    <div className="gtile brackets" {...tiltHandlers()}>
+      <Link to={`/library/${encodeURIComponent(game.id)}`} aria-label={game.name} className="tilt">
         <Cover game={game} />
+        <span className="glare" aria-hidden />
       </Link>
       <div className="badges">
         {game.running && <span className="badge live">Live</span>}

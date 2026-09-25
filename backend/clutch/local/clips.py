@@ -75,6 +75,9 @@ class ClipStore:
         self.thumbs.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
+    def close(self) -> None:
+        self.db.close()
+
     # ── paths ───────────────────────────────────────────────────────────────
     @staticmethod
     def new_path(root: Path, game_name: str | None, kind: str, ext: str = ".mp4") -> Path:

@@ -27,5 +27,7 @@ def _no_keys(monkeypatch):
 
 
 @pytest.fixture
-def svc() -> Clutch:
-    return Clutch(Store(":memory:"), default_providers())
+def svc():
+    svc = Clutch(Store(":memory:"), default_providers())
+    yield svc
+    svc.store.close()

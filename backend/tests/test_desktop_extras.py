@@ -64,6 +64,7 @@ def test_report_card_summarises_the_session(tmp_path):
     assert report["clips"] == [4, 5] and report["stats"] is None
     filled = store.attach_stats(report["id"], "lol", summary)
     assert filled["stats"]["wins"] == 2 and store.recent()[0]["id"] == report["id"]
+    store.close()
 
 
 # ── goals ───────────────────────────────────────────────────────────────────
@@ -92,6 +93,7 @@ def test_goals_track_time_clips_win_rate_and_rank(tmp_path):
     assert rank["state"] == "ok" and rank["current"] == "Gold 3"
     assert evaluate({"kind": "rank", "target": 5, "game_id": "lol"}, ctx)["state"] == "unlinked"
     assert len(store.all()) == 5
+    store.close()
 
 
 # ── friends ─────────────────────────────────────────────────────────────────
@@ -115,6 +117,7 @@ def test_friends_feed_from_public_profiles(tmp_path):
     assert len(out["items"]) == 10 and out["items"] == sorted(out["items"], key=lambda m: m["date"], reverse=True)
     friends.remove("dota2", svc.lookup("dota2", "demo").key)
     assert [f["game"] for f in friends.friends] == ["valorant"]
+    svc.store.close()
 
 
 # ── auto-clip ───────────────────────────────────────────────────────────────
@@ -289,7 +292,9 @@ def api(tmp_path, monkeypatch, clips):
     desk.library.scan()
     profile = svc.lookup("dota2", "demo")
     desk.settings.update({"linked_profiles": {"dota2": profile.key}})
-    return TestClient(create_app(svc, static_dir=None, desktop=desk)), desk, svc, profile
+    yield TestClient(create_app(svc, static_dir=None, desktop=desk)), desk, svc, profile
+    desk.shutdown()
+    svc.store.close()
 
 
 def test_clip_links_to_the_match_it_was_recorded_in(api, clips, tmp_path):

@@ -575,3 +575,7 @@ class Desktop:
         self.gsi.stop()
         self.playtime.stop()
         self.buffer.stop()
+        self.playtime.close()
+        self.clips.close()
+        self.reports.close()
+        self.goals.close()

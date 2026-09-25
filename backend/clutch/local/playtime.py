@@ -120,6 +120,9 @@ class PlaytimeTracker:
         self.on_stop: list[Callable[[Game, dict[str, Any]], None]] = []
         self._close_orphans()
 
+    def close(self) -> None:
+        self.db.close()
+
     def _close_orphans(self) -> None:
         """Sessions still marked active are from a previous run that didn't shut down cleanly."""
         with self._lock:

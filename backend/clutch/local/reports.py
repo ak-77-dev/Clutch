@@ -78,6 +78,9 @@ class ReportStore:
         self.db.executescript(SCHEMA)
         self._lock = threading.Lock()
 
+    def close(self) -> None:
+        self.db.close()
+
     def create(self, session: dict[str, Any], clip_ids: list[int]) -> dict[str, Any]:
         data = {"seconds": session["seconds"], "clips": clip_ids, "stats": None, "stats_game": None}
         with self._lock:

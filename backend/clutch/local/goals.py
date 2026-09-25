@@ -48,6 +48,9 @@ class GoalStore:
         self.db.executescript(SCHEMA)
         self._lock = threading.Lock()
 
+    def close(self) -> None:
+        self.db.close()
+
     def add(self, kind: str, target: float, game_id: str | None = None, label: str | None = None) -> dict[str, Any]:
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {', '.join(KINDS)}")

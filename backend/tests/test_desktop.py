@@ -204,6 +204,7 @@ def test_playtime_sessions_events_and_daily_split(tmp_path):
     assert tracker.summary()[0]["sessions"] == 1
     assert sum(d["seconds"] for d in tracker.daily(7)) == pytest.approx(3605, abs=1)
     assert stats_game_for(game) == "dota2"
+    tracker.close()
 
 
 # ── audio timeline ───────────────────────────────────────────────────────────
@@ -289,6 +290,7 @@ def test_clip_store_indexes_edits_and_exports(tmp_path, sample_video):
     assert store.stats()["count"] == 4
     store.delete(trimmed["id"], delete_file=False)
     assert store.stats()["count"] == 3
+    store.close()
 
 
 def test_clip_store_imports_existing_files(tmp_path, sample_video):
@@ -301,6 +303,7 @@ def test_clip_store_imports_existing_files(tmp_path, sample_video):
     assert store.list()[0]["game_name"] == "Valorant"
     copy.unlink()
     assert store.prune_missing() == 1
+    store.close()
 
 
 def test_new_clip_paths_are_safe_and_unique(tmp_path):
@@ -344,7 +347,9 @@ def desktop_api(tmp_path, monkeypatch, sample_video):
     )
     desktop.library.scan()
     desktop.clips.add(sample_video, kind="clip", game_id="steam:570", game_name="Dota 2")
-    return TestClient(create_app(svc, static_dir=None, desktop=desktop)), desktop
+    yield TestClient(create_app(svc, static_dir=None, desktop=desktop)), desktop
+    desktop.shutdown()
+    svc.store.close()
 
 
 def test_desktop_api_requires_the_token(desktop_api):
@@ -381,8 +386,10 @@ def test_desktop_routes_absent_in_web_mode(monkeypatch):
     from clutch.store import Store
 
     monkeypatch.delenv("CLUTCH_DESKTOP", raising=False)
-    api = TestClient(create_app(Clutch(Store(":memory:"), default_providers()), static_dir=None))
+    svc = Clutch(Store(":memory:"), default_providers())
+    api = TestClient(create_app(svc, static_dir=None))
     assert api.get("/api/desktop/status").status_code == 404
+    svc.store.close()
 
 
 def test_stale_recorders_from_a_crashed_run_are_stopped(tmp_path):
@@ -437,6 +444,7 @@ def test_stale_recorders_from_a_crashed_run_are_stopped(tmp_path):
         for p in (stray, other):
             if p.poll() is None:
                 p.kill()
+            p.wait()
 
 
 @pytest.mark.parametrize(("click_at", "clip_start"), [(3.0, 1.0), (3.0, 1.37), (5.2, 0.81), (4.4, 0.013)])

@@ -200,15 +200,18 @@ def test_lookup_syncs_once_then_incrementally():
     p.remote.append({"id": "m3", "date": "2026-09-09T10:00:00Z", "won": True})
     assert svc.sync("t", prof.key)["new"] == 1 and p.fetched[-1] == "m3"
     assert svc.match_page("t", "p1")["total"] == 4
+    svc.store.close()
 
 
 def test_unconfigured_and_not_found():
     svc = Clutch(Store(":memory:"), [FakeProvider(configured=False)])
     with pytest.raises(NotConfigured):
         svc.lookup("t", "Player#1")
+    svc.store.close()
     svc2 = Clutch(Store(":memory:"), [FakeProvider()])
     with pytest.raises(NotFound):
         svc2.lookup("t", "ghost#1")
+    svc2.store.close()
 
 
 def test_demo_profile_needs_no_key():
@@ -216,6 +219,7 @@ def test_demo_profile_needs_no_key():
     prof = svc.lookup("t", "demo")
     assert prof.demo and svc.match_page("t", prof.key)["total"] == 1
     assert svc.sync("t", prof.key)["demo"] is True
+    svc.store.close()
 
 
 def test_store_links_one_match_to_many_players(tmp_path):
@@ -223,3 +227,4 @@ def test_store_links_one_match_to_many_players(tmp_path):
     st.add_matches("g", "a", [("m1", "2026-01-01", {"x": 1})])
     st.add_matches("g", "b", [("m1", "2026-01-01", {"x": 2})])
     assert st.raw_matches("g", "a") == [{"x": 2}] and st.known_match_ids("g", "b") == {"m1"}
+    st.close()

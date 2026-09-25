@@ -21,7 +21,7 @@ const run = (cmd, args, cwd) => {
 run(python, [
   '-m', 'PyInstaller', '--noconfirm', '--clean', '--log-level', 'WARN', '--onedir', '--name', 'clutch-backend',
   '--distpath', 'dist', '--workpath', 'build', '--specpath', 'build',
-  '--paths', path.join(root, '..', 'rl-stat-tracker'), '--paths', '.',
+  '--paths', path.join(root, 'rl-stat-tracker'), '--paths', '.',
   // FFmpeg and PortAudio ship as binaries inside these packages
   '--collect-all', 'imageio_ffmpeg', '--collect-all', 'pyaudiowpatch',
   '--collect-submodules', 'clutch', '--collect-submodules', 'uvicorn', '--collect-submodules', 'rlstats', '--collect-data', 'rlstats',

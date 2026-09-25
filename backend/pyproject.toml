@@ -12,7 +12,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "requests>=2.31",
   "python-dotenv>=1.0",
-  "rlstats>=2.0",  # ../../rl-stat-tracker — install it first (see README)
+  "rlstats>=2.0",  # ../rl-stat-tracker — install it first (see README)
 ]
 
 [project.optional-dependencies]

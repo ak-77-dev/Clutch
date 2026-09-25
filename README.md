@@ -32,9 +32,9 @@ Every stats game has a **demo profile**: a synthetic season generated in that ga
 
 ```bash
 # 1. backend (Python 3.10+)
-cd clutch/backend
+cd backend
 python -m venv .venv && .venv\Scripts\activate         # macOS/Linux: . .venv/bin/activate
-pip install -e ../../rl-stat-tracker -e ".[desktop,dev]"
+pip install -e ../rl-stat-tracker -e ".[desktop,dev]"
 
 # 2. frontend (Node 20+)
 cd ../frontend && npm install && npm run build
@@ -51,7 +51,7 @@ The desktop app starts the backend for you and lives in the tray. Closing the wi
 ### Windows installer
 
 ```bash
-cd clutch/backend && pip install -e ".[desktop,build]"   # + PyInstaller
+cd backend && pip install -e ".[desktop,build]"   # + PyInstaller
 cd ../desktop && npm run dist                           # -> desktop/dist/Clutch-Setup-<version>.exe
 ```
 

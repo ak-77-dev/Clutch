@@ -1,0 +1,60 @@
+name: clutch-release
+
+# Builds the Windows installer and publishes it (plus latest.yml for auto-update)
+# to the public ak-77-dev/clutch-releases repo. Runs only when a tag like
+# clutch-v0.3.1 is pushed; the tag must match desktop/package.json's version.
+# Needs a CLUTCH_RELEASES_TOKEN secret: a fine-grained token with
+# "Contents: read and write" on ak-77-dev/clutch-releases.
+
+on:
+  push:
+    tags: ["clutch-v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to clutch-releases (off = build only, attach as artifact)"
+        type: boolean
+        default: false
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          want="clutch-v$(node -p "require('./desktop/package.json').version")"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "Tag $GITHUB_REF_NAME but package.json says $want"; exit 1; }
+
+      - name: Install
+        shell: bash
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/Scripts/python -m pip install -e rl-stat-tracker -e "backend[desktop,build]"
+          (cd frontend && npm ci)
+          (cd desktop && npm ci)
+
+      - name: Build (and publish)
+        working-directory: desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CLUTCH_RELEASES_TOKEN }}
+        run: |
+          if [ "${{ startsWith(github.ref, 'refs/tags/') || inputs.publish }}" = "true" ]; then npm run dist -- --publish; else npm run dist; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clutch-installer
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/latest.yml
+          if-no-files-found: error

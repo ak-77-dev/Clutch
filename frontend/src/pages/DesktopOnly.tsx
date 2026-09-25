@@ -15,7 +15,7 @@ export function DesktopOnly({ feature, children }: { feature: string; children: 
       </div>
       <p className="muted" style={{ margin: 0, maxWidth: 560 }}>
         The Clutch desktop app finds every game you have installed, launches them, tracks your playtime, and clips your best moments with a hotkey.
-        Run it from the <code>clutch/desktop</code> folder with <code>npm start</code>.
+        Run it from the <code>desktop</code> folder with <code>npm start</code>.
       </p>
     </div>
   )

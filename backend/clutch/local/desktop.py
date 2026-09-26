@@ -35,6 +35,8 @@ from clutch.local.media import MediaService
 from clutch.local.playtime import PlaytimeTracker, stats_game_for
 from clutch.local.reports import ReportStore, iso_ts, match_window, summarize_matches
 from clutch.local.storage import plan_cleanup
+from clutch.local.sync import SETTINGS as SYNCED_SETTINGS
+from clutch.local.sync import SyncFolder
 
 
 class EventBus:
@@ -96,8 +98,11 @@ class Desktop:
         self.playtime.on_start.append(self._game_started)
         self.playtime.on_stop.append(self._game_stopped)
         self.settings.on_change(self._settings_changed)
+        self.sync = SyncFolder(self)
+        self._synced_cfg = self._sync_fields()
         self.clips_root.mkdir(parents=True, exist_ok=True)
         if start_threads:
+            self.sync.enable()  # pick up keys and linked accounts added on another PC
             self.buffer.cleanup_stale()
             self.library.scan()  # ~20 ms; picks up games installed since last run
             threading.Thread(target=self._warm_art, name="clutch-art", daemon=True).start()
@@ -212,11 +217,19 @@ class Desktop:
     # ── background upkeep ───────────────────────────────────────────────────
     def _minutely(self) -> None:  # pragma: no cover - timing loop
         while not self._stop.wait(60):
-            for job in (self.check_goals, self.refresh_friends, self.enforce_storage):
+            for job in (self.sync.pull, self.check_goals, self.refresh_friends, self.enforce_storage):
                 with contextlib.suppress(Exception):
                     job()
 
+    def _sync_fields(self) -> dict[str, Any]:
+        return {k: getattr(self.cfg, k) for k in ("sync_folder", *SYNCED_SETTINGS)}
+
     def _settings_changed(self, s: Settings) -> None:
+        before, self._synced_cfg = self._synced_cfg, self._sync_fields()
+        if before["sync_folder"] != s.sync_folder:
+            self.sync.enable()
+        elif before != self._synced_cfg:
+            self.sync.push()
         if self.buffer.active and not self.buffer.recording_since:
             new = self.capture_config()
             if asdict(new) != asdict(self.buffer.cfg):
@@ -240,7 +253,8 @@ class Desktop:
     def keys_view(self) -> dict[str, Any]:
         from clutch.local import keys
 
-        return keys.status()
+        self.sync.pull()
+        return {**keys.status(), "sync": self.sync.status()}
 
     def set_keys(self, values: dict[str, Any]) -> dict[str, Any]:
         from clutch.local import keys
@@ -250,7 +264,8 @@ class Desktop:
             from clutch.games import default_providers
 
             self.stats.providers = {p.meta.id: p for p in default_providers()}
-        return result
+        self.sync.push()
+        return {**result, "sync": self.sync.status()}
 
     def capabilities(self) -> dict[str, Any]:
         """What this PC can record with: encoders per codec, and audio devices."""

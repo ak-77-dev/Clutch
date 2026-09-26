@@ -221,6 +221,7 @@ export interface Settings {
   hotkey_media_prev: string
   music_duck: boolean
   music_duck_level: number
+  sync_folder: string
 }
 
 export interface MediaSession {
@@ -356,6 +357,16 @@ export interface ApiKeys {
   path: string
   keys: { name: string; game: string; label: string; help: string; set: boolean; preview: string }[]
   lol_platform: string
+  sync: SyncStatus
+}
+
+/** The OneDrive / Dropbox folder that carries keys and linked accounts between PCs. */
+export interface SyncStatus {
+  folder: string
+  file: string
+  last_synced: number | null
+  error: string | null
+  suggested: string | null
 }
 
 export interface ClipMatch {

@@ -1,7 +1,7 @@
 {
   "name": "clutch-desktop",
   "productName": "Clutch",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Clutch desktop: game launcher, playtime tracker, hotkey clipping and stats hub.",
   "main": "main.js",
   "private": true,

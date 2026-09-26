@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Hotkey, Toggle } from '../components/Controls'
 import { useDesktop } from '../components/Shell'
-import { bridge, desktop, type ApiKeys, type AutoClipGame, type Capabilities, type Settings, type StorageInfo } from '../desktop'
+import { bridge, desktop, type ApiKeys, type AutoClipGame, type Capabilities, type Settings, type StorageInfo, type SyncStatus } from '../desktop'
 import { useGames, useReloadGames } from '../hooks'
 import { estimateSize, fmtBytes } from '../format'
 
@@ -30,17 +30,19 @@ function TextSetting({ value, onSave, placeholder, secret = false, width = 260 }
   )
 }
 
-/** Riot / HenrikDev / ballchasing keys, written to the .env next to Clutch's database. */
-function ApiKeysCard() {
+/** Riot / HenrikDev / ballchasing keys, written to the .env next to Clutch's database
+ * and, with a sync folder, carried to the player's other PCs. */
+function ApiKeysCard({ syncFolder, save }: { syncFolder: string; save: (p: Partial<Settings>) => Promise<void> }) {
   const { toast } = useDesktop()
   const reloadGames = useReloadGames()
   const [keys, setKeys] = useState<ApiKeys | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   useEffect(() => {
     desktop.keys().then(setKeys, () => {})
-  }, [])
+    reloadGames() // joining a sync folder can bring keys, which turns on live stats
+  }, [syncFolder, reloadGames])
 
-  async function save(values: Record<string, string | null>, what: string) {
+  async function saveKeys(values: Record<string, string | null>, what: string) {
     try {
       setKeys(await desktop.saveKeys(values))
       setDrafts({})
@@ -66,14 +68,14 @@ function ApiKeysCard() {
               spellCheck={false}
               autoComplete="off"
               onChange={(e) => setDrafts((d) => ({ ...d, [k.name]: e.target.value }))}
-              onKeyDown={(e) => e.key === 'Enter' && drafts[k.name]?.trim() && void save({ [k.name]: drafts[k.name].trim() }, `${k.label} saved`)}
+              onKeyDown={(e) => e.key === 'Enter' && drafts[k.name]?.trim() && void saveKeys({ [k.name]: drafts[k.name].trim() }, `${k.label} saved`)}
             />
           </label>
-          <button className="btn small" disabled={!drafts[k.name]?.trim()} onClick={() => void save({ [k.name]: drafts[k.name].trim() }, `${k.label} saved`)}>
+          <button className="btn small" disabled={!drafts[k.name]?.trim()} onClick={() => void saveKeys({ [k.name]: drafts[k.name].trim() }, `${k.label} saved`)}>
             Save
           </button>
           {k.set && (
-            <button className="btn small ghost" onClick={() => window.confirm(`Remove the ${k.label}?`) && void save({ [k.name]: null }, `${k.label} removed`)}>
+            <button className="btn small ghost" onClick={() => window.confirm(`Remove the ${k.label}?`) && void saveKeys({ [k.name]: null }, `${k.label} removed`)}>
               Remove
             </button>
           )}
@@ -84,7 +86,7 @@ function ApiKeysCard() {
       ))}
       <Row t="League region" h="Where your League account plays.">
         <label className="field" style={{ width: 120 }}>
-          <select value={keys.lol_platform} onChange={(e) => void save({ LOL_PLATFORM: e.target.value }, 'Region saved')}>
+          <select value={keys.lol_platform} onChange={(e) => void saveKeys({ LOL_PLATFORM: e.target.value }, 'Region saved')}>
             {LOL_PLATFORMS.map((p) => (
               <option key={p} value={p}>
                 {p.toUpperCase()}
@@ -93,10 +95,49 @@ function ApiKeysCard() {
           </select>
         </label>
       </Row>
+      <SyncRow sync={keys.sync} save={save} />
       <p className="mono muted" style={{ margin: '10px 0 0', fontSize: 10.5 }}>
-        Stored on this PC only · {keys.path}
+        {keys.sync.folder ? `Synced · ${keys.sync.file}` : `Stored on this PC only · ${keys.path}`}
       </p>
     </section>
+  )
+}
+
+/** Point Clutch at a cloud folder so keys and linked accounts follow you to other PCs. */
+function SyncRow({ sync, save }: { sync: SyncStatus; save: (p: Partial<Settings>) => Promise<void> }) {
+  const when = sync.last_synced ? new Date(sync.last_synced * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null
+  return (
+    <Row
+      t="Sync to your other PCs"
+      h={
+        sync.error ??
+        (sync.folder
+          ? `API keys and linked accounts are shared through ${sync.folder}${when ? ` · last synced ${when}` : ''}. Choose the same folder on your other PCs.`
+          : 'Keep your API keys and linked accounts in a OneDrive, Dropbox or Google Drive folder, so every PC you sign in on picks them up. The keys are stored unencrypted in that folder, so pick one only you can access.')
+      }
+    >
+      {!sync.folder && sync.suggested && (
+        <button className="btn small" onClick={() => void save({ sync_folder: sync.suggested! })}>
+          Use OneDrive
+        </button>
+      )}
+      {bridge && (
+        <button
+          className="btn small ghost"
+          onClick={async () => {
+            const dir = await bridge?.pickFolder()
+            if (dir) void save({ sync_folder: dir })
+          }}
+        >
+          {sync.folder ? 'Change…' : 'Choose folder…'}
+        </button>
+      )}
+      {sync.folder && (
+        <button className="btn small ghost" onClick={() => void save({ sync_folder: '' })}>
+          Stop syncing
+        </button>
+      )}
+    </Row>
   )
 }
 
@@ -530,7 +571,7 @@ function SettingsInner() {
           <StorageCard s={s} save={save} />
         </section>
 
-        <ApiKeysCard />
+        <ApiKeysCard syncFolder={s.sync_folder} save={save} />
 
         <section className="card">
           <h2>App</h2>

@@ -91,6 +91,8 @@ Paste keys in **Settings → API keys** (they're written to the `.env` next to t
 | Chess.com, Lichess | none | Public APIs. Openings are the "characters": the pool view shows which ones win for you. |
 | Call of Duty (experimental) | `COD_SSO_TOKEN` (+ `COD_TITLE`, default `bo7`) | Your own `ACT_SSO_COOKIE` from callofduty.com. Activision has no public API. See below. |
 
+**Using Clutch on more than one PC.** Keys and linked accounts are saved per PC. To share them, open **Settings → API keys → Sync to your other PCs** and choose a OneDrive, Dropbox or Google Drive folder (OneDrive is one click). Clutch keeps `clutch-sync.json` there with your keys, linked accounts, SteamGridDB key and Discord app ID. Every PC pointed at that folder picks up changes within a minute, and keeps a local copy for when the folder is offline. The keys are stored unencrypted in that file, so use a folder only you can access.
+
 Optional extras, also in Settings: a free [SteamGridDB](https://www.steamgriddb.com/profile/preferences/api) key for cover art on non-Steam games, and a Discord application ID for Rich Presence (create one at [discord.com/developers](https://discord.com/developers/applications) and name it "Clutch": Discord shows "Playing Clutch").
 
 **About Call of Duty.** Activision only opens its stats API to partners. The adapter talks to callofduty.com's own endpoints, signed in as *you* with your session cookie. It's built from those endpoints' documented shape and tested against demo data, but not yet against live responses, so treat it as experimental. Launching, playtime and clipping for CoD don't need any of this.

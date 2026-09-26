@@ -371,3 +371,69 @@ def test_one_desktop_backend_per_data_folder(tmp_path):
     again = acquire_instance_lock(tmp_path / "backend.lock")
     assert again is not None
     again.close()
+
+
+# ── sync folder: keys and linked accounts across PCs ────────────────────────
+
+
+def _pc(tmp_path, name, monkeypatch):
+    from clutch.games import default_providers
+    from clutch.local.desktop import Desktop
+    from clutch.service import Clutch
+    from clutch.store import Store
+
+    monkeypatch.setenv("CLUTCH_ENV_FILE", str(tmp_path / name / ".env"))
+    return Desktop(Clutch(Store(":memory:"), default_providers()), home=tmp_path / name, start_threads=False)
+
+
+def test_sync_folder_carries_keys_and_linked_accounts_to_another_pc(tmp_path, monkeypatch):
+    from clutch.local.sync import FILE_NAME
+    from clutch.models import Profile
+
+    for n in ("RIOT_API_KEY", "HENRIK_API_KEY", "LOL_PLATFORM"):
+        monkeypatch.delenv(n, raising=False)
+    cloud = tmp_path / "OneDrive" / "Clutch"
+    cloud.parent.mkdir()
+
+    # Main PC: keys and a linked League account from before sync existed.
+    main = _pc(tmp_path, "main", monkeypatch)
+    main.set_keys({"RIOT_API_KEY": "RGAPI-main-1234", "LOL_PLATFORM": "euw1"})
+    main.stats.store.save_profile(Profile(game="lol", key="puuid-1", name="Me", tag="EUW"))
+    main.settings.update({"linked_profiles": {"lol": "puuid-1"}, "sync_folder": str(cloud)})
+    assert (cloud / FILE_NAME).is_file()
+
+    # Laptop: a fresh install, nothing in its environment.
+    for n in ("RIOT_API_KEY", "LOL_PLATFORM"):
+        monkeypatch.delenv(n)
+    laptop = _pc(tmp_path, "laptop", monkeypatch)
+    laptop.set_keys({"HENRIK_API_KEY": "HDEV-laptop"})  # a key only the laptop has
+    laptop.settings.update({"sync_folder": str(cloud)})
+    assert os.environ["RIOT_API_KEY"] == "RGAPI-main-1234" and os.environ["LOL_PLATFORM"] == "euw1"
+    assert "RIOT_API_KEY=RGAPI-main-1234" in (tmp_path / "laptop" / ".env").read_text(encoding="utf-8")
+    assert laptop.cfg.linked_profiles == {"lol": "puuid-1"}
+    assert laptop.stats.store.profile("lol", "puuid-1").name == "Me"  # auto-sync can find the account
+    assert laptop.keys_view()["sync"]["folder"] == str(cloud)
+
+    # Joining didn't wipe the laptop's own key: it went up to the folder for the main PC.
+    time.sleep(0.05)
+    assert main.sync.pull() is True
+    assert os.environ["HENRIK_API_KEY"] == "HDEV-laptop"
+
+    # A change on one PC reaches the other on its next pull; nothing to do when unchanged.
+    laptop.settings.update({"linked_profiles": {}})
+    time.sleep(0.05)
+    assert main.sync.pull() is True and main.cfg.linked_profiles == {}
+    assert main.sync.pull() is False
+
+
+def test_sync_folder_off_or_unreachable_keeps_local_copy(tmp_path, monkeypatch):
+    monkeypatch.delenv("RIOT_API_KEY", raising=False)
+    pc = _pc(tmp_path, "pc", monkeypatch)
+    assert pc.sync.pull() is False and pc.keys_view()["sync"]["folder"] == ""
+    with pytest.raises(ValueError):
+        pc.settings.update({"sync_folder": str(tmp_path / "nope" / "deeper")})
+    pc.settings.update({"sync_folder": str(tmp_path / "gone")})
+    (tmp_path / "gone" / "clutch-sync.json").unlink()  # the cloud folder went offline
+    pc.set_keys({"RIOT_API_KEY": "RGAPI-still-here"})
+    (tmp_path / "gone" / "clutch-sync.json").unlink()
+    assert pc.sync.pull() is False and os.environ["RIOT_API_KEY"] == "RGAPI-still-here"

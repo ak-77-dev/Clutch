@@ -103,6 +103,8 @@ class Settings:
     hotkey_media_prev: str = "Ctrl+Alt+Left"
     music_duck: bool = False
     music_duck_level: int = 30  # percent of the app's volume while a game runs
+    # A OneDrive / Dropbox folder that carries API keys and linked accounts to your other PCs ("" = off)
+    sync_folder: str = ""
 
     def __post_init__(self) -> None:
         if not self.clips_dir:
@@ -167,6 +169,8 @@ class SettingsStore:
                 raise ValueError("storage limits can't be negative")
             if not 0 <= data["music_duck_level"] <= 100:
                 raise ValueError("music_duck_level is a percentage (0-100)")
+            if data["sync_folder"] and not Path(data["sync_folder"]).parent.is_dir():
+                raise ValueError("The sync folder's location doesn't exist")
             self.settings = Settings(**data)
             self.path.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
         for fn in self._listeners:

@@ -10,9 +10,11 @@
     "dev": "cross-env CLUTCH_DEV_URL=http://localhost:5173 electron .",
     "check": "node --check main.js && node --check preload.js && node --check lib.js && node --check discord.js && node --check scripts/build.js && node --test",
     "dist": "node scripts/build.js",
-    "pack": "electron-builder --win --dir"
+    "pack": "electron-builder --win --dir",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "cross-env": "^7.0.3",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3"

@@ -28,6 +28,11 @@ let settings = {}
 let buffer = { active: false, recording: false }
 let toldAboutTray = false
 
+// A separate profile (end-to-end tests) runs beside the real app: its own userData folder,
+// so its own single-instance lock and logs, and no global hotkeys or Discord presence.
+if (process.env.CLUTCH_USER_DATA) app.setPath('userData', process.env.CLUTCH_USER_DATA)
+const TEST_MODE = process.env.CLUTCH_TEST === '1'
+
 app.setAppUserModelId('gg.clutch.desktop')
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required') // overlay sounds
 
@@ -456,6 +461,7 @@ async function registerHotkeys() {
   } catch {
     return
   }
+  if (TEST_MODE) return refreshTray() // leave the real app's hotkeys (F8, ...) alone
   globalShortcut.unregisterAll()
   const failed = []
   const bindings = [
@@ -578,7 +584,7 @@ async function boot() {
   await registerHotkeys()
   followEvents()
   setInterval(refreshPanel, 5000)
-  setInterval(() => syncDiscord(true), 60_000) // Discord restarted or started after Clutch: reconnect quietly
+  if (!TEST_MODE) setInterval(() => syncDiscord(true), 60_000) // Discord restarted or started after Clutch: reconnect quietly
   if (app.isPackaged) {
     setTimeout(() => checkForUpdates(false), 15_000)
     setInterval(() => checkForUpdates(false), 6 * 60 * 60 * 1000) // Clutch lives in the tray for days

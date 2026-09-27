@@ -6,3 +6,6 @@
 __pycache__/
 *.pyc
 .venv/
+
+# End-to-end test output
+desktop/e2e-results/

@@ -281,7 +281,9 @@ class Desktop:
         return {"encoders": capabilities(), "audio": list_audio_devices()}
 
     def save_clip(self, seconds: float | None = None, *, title: str | None = None, auto: bool = False) -> dict[str, Any]:
-        if not self.buffer.active:
+        # "armed", not "active": while a game has knocked the recorder over for a second,
+        # everything buffered so far can still be saved.
+        if not self.buffer.armed:
             self.set_buffer(True)
             raise RuntimeError("The replay buffer was off, so it's on now. Press the hotkey again in a few seconds.")
         game = self.current_game()

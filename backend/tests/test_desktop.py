@@ -186,8 +186,9 @@ def test_playtime_sessions_events_and_daily_split(tmp_path):
     procs.add(exe)
     tracker.poll()
     assert [g.id for g in started] == ["steam:570"] and tracker.now_playing()[0]["game_name"] == "Dota 2"
-    clock["t"] += 3600
-    tracker.poll()
+    for _ in range(60):  # an hour of play, polled every minute
+        clock["t"] += 60
+        tracker.poll()
     procs.clear()
     clock["t"] += 5
     tracker.poll()
@@ -204,6 +205,28 @@ def test_playtime_sessions_events_and_daily_split(tmp_path):
     assert tracker.summary()[0]["sessions"] == 1
     assert sum(d["seconds"] for d in tracker.daily(7)) == pytest.approx(3605, abs=1)
     assert stats_game_for(game) == "dota2"
+
+
+def test_playtime_does_not_count_sleep(tmp_path):
+    game = lib.Game("steam:570", "Dota 2", "steam", str(tmp_path / "dota"), {})
+    clock = {"t": 1_700_000_000.0}
+    procs = {str(tmp_path / "dota" / "dota2.exe")}
+    events = []
+    tracker = PlaytimeTracker(tmp_path / "p.db", lambda: [game], list_processes=lambda: procs, clock=lambda: clock["t"])
+    tracker.on_start.append(lambda g: events.append("start"))
+    tracker.on_stop.append(lambda g, info: events.append(round(info["seconds"])))
+    tracker.poll()
+    for _ in range(20):  # 20 minutes of play
+        clock["t"] += 60
+        tracker.poll()
+    clock["t"] += 8 * 3600  # the laptop slept overnight with the game open
+    tracker.poll()
+    for _ in range(10):  # back in game for 10 minutes
+        clock["t"] += 60
+        tracker.poll()
+    assert events == ["start", 1200, "start"]  # the night is a gap, not 8 hours of Dota
+    assert tracker.summary()[0]["seconds"] == pytest.approx(1200 + 600)
+    assert tracker.now_playing()[0]["seconds"] == pytest.approx(600)
 
 
 # ── audio timeline ───────────────────────────────────────────────────────────

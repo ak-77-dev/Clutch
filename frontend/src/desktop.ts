@@ -14,7 +14,7 @@ export interface DesktopBridge {
   platform: string
   version: string
   pickExecutable: () => Promise<string | null>
-  pickFolder: () => Promise<string | null>
+  pickFolder: (title?: string) => Promise<string | null>
   reloadHotkeys: () => void
   setLoginItem: (open: boolean) => void
   displays: () => Promise<{ id: number; label: string; primary: boolean; width: number; height: number }[]>
@@ -392,7 +392,7 @@ export type DesktopEvent =
   | { type: 'clip_saving'; at: number; game_name: string | null }
   | ({ type: 'buffer'; at: number; reason?: string } & BufferStatus)
   | ({ type: 'recording'; at: number } & BufferStatus)
-  | { type: 'game_started'; at: number; game_id: string; game_name: string; stats_game: string | null }
+  | { type: 'game_started'; at: number; game_id: string; game_name: string; stats_game: string | null; armed?: boolean }
   | { type: 'session_end'; at: number; game_id: string; game_name: string; seconds: number; clips: number }
   | { type: 'launching'; at: number; game_id: string; game_name: string }
   | { type: 'stats_synced'; at: number; game: string; key: string; new: number }

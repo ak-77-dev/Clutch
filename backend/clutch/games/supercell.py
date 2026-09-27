@@ -202,7 +202,7 @@ class BrawlStarsProvider(_Supercell):
             },
             score_line=f"#{rank}" if rank is not None else {"win": "Victory", "loss": "Defeat", "draw": "Draw"}[result],
             teammates=[p.get("name") or "?" for p in mine if p is not me],
-            team_keys=[p["tag"] for p in mine if p is not me and p.get("tag")],
+            team_keys=[p.get("tag") or "" for p in mine if p is not me],  # aligned with teammates
             scoreboard=[
                 ScoreRow(
                     name=p.get("name") or "?",
@@ -361,7 +361,7 @@ class ClashRoyaleProvider(_Supercell):
             },
             score_line=f"{mine}–{theirs}",
             teammates=[p.get("name") or "?" for p in team if p is not me],
-            team_keys=[p["tag"] for p in team if p is not me and p.get("tag")],
+            team_keys=[p.get("tag") or "" for p in team if p is not me],  # aligned with teammates
             scoreboard=[
                 ScoreRow(
                     name=p.get("name") or "?",

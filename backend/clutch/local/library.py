@@ -119,7 +119,26 @@ def parse_vdf(text: str) -> dict[str, Any]:
     return root
 
 
-def scan_steam(steam_dir: Path = STEAM_DEFAULT) -> list[Game]:
+def steam_install_dir() -> Path:
+    """Where the Steam client is installed: Steam records it in the registry (it's often not on C:)."""
+    if sys.platform == "win32":  # pragma: no cover - Windows registry
+        import winreg
+
+        for hive, key, value in (
+            (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+        ):
+            with contextlib.suppress(OSError):
+                with winreg.OpenKey(hive, key) as k:
+                    path = Path(str(winreg.QueryValueEx(k, value)[0]))
+                if (path / "steamapps").is_dir():
+                    return path
+    return STEAM_DEFAULT
+
+
+def scan_steam(steam_dir: Path | None = None) -> list[Game]:
+    steam_dir = steam_dir or steam_install_dir()
     lib_file = steam_dir / "steamapps" / "libraryfolders.vdf"
     try:
         libs = parse_vdf(lib_file.read_text(encoding="utf-8", errors="replace")).get("libraryfolders", {})
@@ -358,7 +377,9 @@ class Library:
             "hidden": sorted(self.hidden),
             "shown": sorted(self.shown),
         }
-        self.cache.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+        tmp = self.cache.with_name(self.cache.name + ".tmp")  # hidden and custom games live here: never half-write it
+        tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+        os.replace(tmp, self.cache)
 
     def scan(self) -> list[Game]:
         found: dict[str, Game] = {}
@@ -405,8 +426,22 @@ class Library:
     def add_custom(self, name: str, exe: str) -> Game:
         path = Path(exe)
         if path.suffix.lower() not in (".exe", ".lnk", ".url", ".bat"):
-            raise ValueError("Pick an .exe, .lnk or .url file")
-        g = Game(f"custom:{_slug(name)}", name, "custom", str(path.parent), {"exe": str(path)}, exe=str(path), icon_path=str(path))
+            raise ValueError("Pick an .exe, .lnk, .url or .bat file")
+        # The playtime monitor spots a game by its install folder. A shortcut's own folder
+        # (the Desktop, say) isn't one, so use the folder of the program it points to, if any.
+        target = _shortcut_target(path) if path.suffix.lower() == ".lnk" else None
+        if target:
+            install = str(Path(target).parent)
+        elif path.suffix.lower() in (".lnk", ".url"):
+            install = ""  # unknown: better no playtime than counting whatever else runs from that folder
+        else:
+            install = str(path.parent)
+        # A unique id: two games may share a name, and names like "原神" have no ASCII to slug.
+        base = f"custom:{_slug(name) or _slug(path.stem) or 'game'}"
+        gid, n = base, 2
+        while (gid in self.custom and self.custom[gid].exe != str(path)) or gid in self.games:
+            gid, n = f"{base}-{n}", n + 1
+        g = Game(gid, name, "custom", install, {"exe": str(path)}, exe=str(path), icon_path=target or str(path))
         self.custom[g.id] = g
         self._save()
         return g
@@ -462,6 +497,19 @@ def _steam_icon(cache: Path, appid: str) -> str | None:
         return None
     icons = sorted(p for p in folder.glob("*.jpg") if re.fullmatch(r"[0-9a-f]{40}\.jpg", p.name))
     return str(icons[0]) if icons else None
+
+
+def _shortcut_target(lnk: Path) -> str | None:  # pragma: no cover - Windows shell COM
+    """The program a ``.lnk`` shortcut starts (via the Windows shell), or None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        from comtypes.client import CreateObject
+
+        target = CreateObject("WScript.Shell").CreateShortcut(str(lnk)).TargetPath
+    except Exception:
+        return None
+    return target if target and target.lower().endswith(".exe") and Path(target).is_file() else None
 
 
 def _exe_from(value: str, suffixes: tuple[str, ...] = (".exe",)) -> str | None:

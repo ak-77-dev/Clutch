@@ -26,9 +26,9 @@ export function plural(noun: string): string {
 }
 
 export function fmtDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
+  const total = Math.round(seconds) // round first: 119.6 s is "2:00", not "1:60"
+  const m = Math.floor(total / 60)
+  return `${m}:${String(total % 60).padStart(2, '0')}`
 }
 
 export function fmtWinRate(v: number | null | undefined): string {
@@ -105,6 +105,7 @@ export function timeAgoUnix(unix: number | null | undefined, now: Date = new Dat
 /** Short monogram for games without official art (never a logo). */
 export function monogram(name: string): string {
   const words = name.replace(/[^A-Za-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean)
+  if (!words.length) return [...name.trim()].slice(0, 2).join('') || '?' // e.g. "原神": no Latin letters to use
   if (words.length === 1) return words[0].slice(0, 3).toUpperCase()
   return words.slice(0, 3).map((w) => w[0]).join('').toUpperCase()
 }
@@ -130,7 +131,29 @@ const SPECIAL_KEYS: Record<string, string> = {
   Minus: '-',
   Equal: '=',
   Backquote: '`',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  Enter: 'Enter',
+  NumpadEnter: 'Enter',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  PrintScreen: 'PrintScreen',
+  MediaPlayPause: 'MediaPlayPause',
+  MediaTrackNext: 'MediaNextTrack',
+  MediaTrackPrevious: 'MediaPreviousTrack',
+  MediaStop: 'MediaStop',
+  // Electron's numpad names (not KeyboardEvent's): num0-num9 are handled below
+  NumpadDecimal: 'numdec',
+  NumpadAdd: 'numadd',
+  NumpadSubtract: 'numsub',
+  NumpadMultiply: 'nummult',
+  NumpadDivide: 'numdiv',
 }
+// Keys a game or chat uses on their own: a hotkey needs a modifier with them.
+const NEEDS_MODIFIER = /^([A-Z0-9]|Up|Down|Left|Right|Enter|Tab|Backspace|Delete|Space)$/
 
 /** KeyboardEvent -> Electron accelerator ("Alt+F8", "CommandOrControl+Shift+K"). */
 export function accelerator(e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>): string | null {
@@ -139,12 +162,12 @@ export function accelerator(e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 
   if (/^F\d{1,2}$/.test(e.key)) key = e.key
   else if (e.code.startsWith('Key')) key = e.code.slice(3)
   else if (e.code.startsWith('Digit')) key = e.code.slice(5)
-  else if (e.code.startsWith('Numpad')) key = `num${e.code.slice(6).toLowerCase()}`
+  else if (/^Numpad\d$/.test(e.code)) key = `num${e.code.slice(6)}`
   else key = SPECIAL_KEYS[e.code] ?? ''
   if (!key) return null
   const mods = [e.ctrlKey && 'CommandOrControl', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean)
-  // A bare letter would fire while typing in chat: require a modifier unless it's a function/special key.
-  if (!mods.length && /^[A-Z0-9]$/.test(key)) return null
+  // A bare letter or arrow would fire while typing in chat or moving in game: require a modifier.
+  if (!mods.length && NEEDS_MODIFIER.test(key)) return null
   return [...mods, key].join('+')
 }
 

@@ -138,6 +138,7 @@ def create_app(service: Clutch | None = None, *, static_dir: Path | None = DEFAU
             raise _missing(exc) from None
 
     if static_dir and static_dir.is_dir():
+        static_dir = static_dir.resolve()  # CLUTCH_STATIC_DIR may be relative; the containment check needs both sides resolved
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
         @app.get("/{path:path}", include_in_schema=False)

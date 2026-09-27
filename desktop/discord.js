@@ -68,11 +68,16 @@ class DiscordPresence {
           resolve(ok)
         }
         const timer = setTimeout(() => done(false, 'Discord didn’t answer'), timeoutMs)
-        socket.once('error', () => {
+        // 'on', not 'once': a pipe that errors again later (Discord quitting) must not become
+        // an unhandled 'error' event, which would crash the whole app.
+        socket.on('error', () => {
           clearTimeout(timer)
           if (!settled) {
             settled = true
             tryNext()
+          } else if (this.socket === socket) {
+            this.ready = false
+            this.socket = null
           }
         })
         socket.on('connect', () => socket.write(encode(0, { v: 1, client_id: this.clientId })))

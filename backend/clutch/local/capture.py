@@ -28,9 +28,9 @@ import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
-import wave
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -218,8 +218,13 @@ def encoder_works(ffmpeg_encoder: str) -> bool:
     """Whether an encoder actually initializes here (builds list NVENC even without an NVIDIA GPU)."""
     with _probe_lock:
         if ffmpeg_encoder not in _probe_cache:
-            probe = run_ffmpeg(["-f", "lavfi", "-i", "color=black:s=1280x720:d=0.2", "-c:v", ffmpeg_encoder, "-f", "null", "-"], timeout=20)
-            _probe_cache[ffmpeg_encoder] = probe.returncode == 0
+            try:
+                probe = run_ffmpeg(
+                    ["-f", "lavfi", "-i", "color=black:s=1280x720:d=0.2", "-c:v", ffmpeg_encoder, "-f", "null", "-"], timeout=20
+                )
+                _probe_cache[ffmpeg_encoder] = probe.returncode == 0
+            except (OSError, subprocess.SubprocessError):  # a driver that hangs initializing counts as unusable
+                _probe_cache[ffmpeg_encoder] = False
         return _probe_cache[ffmpeg_encoder]
 
 
@@ -273,8 +278,13 @@ def video_args(vendor: str, codec: str, cfg: CaptureConfig) -> list[str]:
 
 def media_info(path: Path) -> dict[str, Any]:
     """Duration and resolution from FFmpeg's stream banner (no ffprobe in the bundled build)."""
-    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    text = proc.stderr
+    try:
+        proc = subprocess.run(
+            [ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True, text=True, timeout=30, creationflags=CREATE_NO_WINDOW
+        )
+        text = proc.stderr or ""
+    except subprocess.TimeoutExpired:  # a file still being written, a network drive that went away...
+        text = ""
     info: dict[str, Any] = {
         "duration": None,
         "width": None,
@@ -404,6 +414,21 @@ def _to_output_format(data: bytes, rate: int, channels: int) -> bytes:
     out[0::2] = array.array("h", (left[i] for i in idx))
     out[1::2] = array.array("h", (right[i] for i in idx))
     return out.tobytes()
+
+
+_WAV_HEADER_BYTES = 44
+
+
+def _wav_header(data_bytes: int) -> bytes:
+    """A canonical 44-byte header for 48 kHz / stereo / 16-bit PCM."""
+    import struct
+
+    byte_rate = OUT_RATE * OUT_CHANNELS * 2
+    return (
+        b"RIFF" + struct.pack("<I", 36 + data_bytes) + b"WAVE"
+        + b"fmt " + struct.pack("<IHHIIHH", 16, 1, OUT_CHANNELS, OUT_RATE, byte_rate, OUT_CHANNELS * 2, 16)
+        + b"data" + struct.pack("<I", data_bytes)
+    )  # fmt: skip
 
 
 class LiveAacEncoder:
@@ -666,29 +691,39 @@ class AudioTrack:
         return sorted(out, key=lambda f: f[0])
 
     def extract(self, t0: float, t1: float, dest: Path) -> Path:
-        """Write ``[t0, t1)`` of the timeline as a 48 kHz stereo WAV (silence where nothing was captured)."""
+        """Write ``[t0, t1)`` of the timeline as a 48 kHz stereo WAV (silence where nothing was captured).
+
+        Written straight to disk, a few seconds at a time: an hour-long recording is
+        ~700 MB of PCM per track, far too much to assemble in memory.
+        """
         self.flush()
         out_frame = 2 * OUT_CHANNELS
-        buf = bytearray(int((t1 - t0) * OUT_RATE) * out_frame)
-        for start, rate, ch, path in self.files():
-            try:
-                data = path.read_bytes()
-            except OSError:
-                continue
-            fb = 2 * ch
-            frames = len(data) // fb
-            lo, hi = max(t0, start), min(t1, start + frames / rate)
-            if hi <= lo:
-                continue
-            chunk = _to_output_format(data[int((lo - start) * rate) * fb : int((hi - start) * rate) * fb], rate, ch)
-            at = int((lo - t0) * OUT_RATE) * out_frame
-            chunk = chunk[: max(0, len(buf) - at)]
-            buf[at : at + len(chunk)] = chunk
-        with wave.open(str(dest), "wb") as w:
-            w.setnchannels(OUT_CHANNELS)
-            w.setsampwidth(2)
-            w.setframerate(OUT_RATE)
-            w.writeframes(bytes(buf))
+        data_bytes = max(0, int((t1 - t0) * OUT_RATE)) * out_frame
+        with open(dest, "wb") as out:
+            out.write(_wav_header(data_bytes))
+            out.truncate(_WAV_HEADER_BYTES + data_bytes)  # zero-filled: silence wherever nothing was captured
+            for start, rate, ch, path in self.files():
+                fb = 2 * ch
+                try:
+                    frames = path.stat().st_size // fb
+                    fh = open(path, "rb")  # noqa: SIM115 - closed below
+                except OSError:
+                    continue
+                with fh:
+                    lo, hi = max(t0, start), min(t1, start + frames / rate)
+                    if hi <= lo:
+                        continue
+                    first, last = int((lo - start) * rate), int((hi - start) * rate)
+                    at = int((lo - t0) * OUT_RATE) * out_frame
+                    fh.seek(first * fb)
+                    out.seek(_WAV_HEADER_BYTES + at)
+                    step = rate * 5  # frames per chunk
+                    for pos in range(first, last, step):
+                        chunk = _to_output_format(fh.read(min(step, last - pos) * fb), rate, ch)
+                        room = _WAV_HEADER_BYTES + data_bytes - out.tell()
+                        if room <= 0:
+                            break
+                        out.write(chunk[:room])  # a later file overwrites an overlap, as a resync intends
         return dest
 
     def prune(self, older_than: float) -> None:
@@ -909,15 +944,16 @@ class ReplayBuffer:
 
     def _janitor_loop(self) -> None:  # pragma: no cover - timing loop around prune()
         while not self._stop.wait(AudioCapture.CHECK_S):
-            if self.proc and self.proc.poll() is not None:
-                self.error = (self._stderr[-1] if self._stderr else "") or f"FFmpeg exited ({self.proc.returncode})"
+            proc, audio = self.proc, self.audio  # stop() can clear these at any moment
+            if proc and proc.poll() is not None:
+                self.error = (self._stderr[-1] if self._stderr else "") or f"FFmpeg exited ({proc.returncode})"
                 return
             self.prune()
-            if self.audio:
+            if audio:
                 try:
-                    self.audio.check()
+                    audio.check()
                 except Exception as exc:
-                    self.audio.last_error = str(exc)
+                    audio.last_error = str(exc)
 
     def prune(self) -> None:
         with self._lock:
@@ -963,8 +999,8 @@ class ReplayBuffer:
             segs = [s for s in self.segments() if s[0] >= cutoff - SEGMENT_S]
             if not segs:
                 raise RuntimeError("Nothing captured yet — give the buffer a second")
-            work = self.spool / f"save_{int(now * 1000)}"
-            work.mkdir()
+            # A unique folder: an auto-clip and a hotkey press can land in the same millisecond.
+            work = Path(tempfile.mkdtemp(prefix=f"save_{int(now * 1000)}_", dir=self.spool))
             # Hard links, not copies: instant for any size, and they survive the janitor deleting the originals.
             links = []
             for i, (_start, path) in enumerate(segs):
@@ -1056,17 +1092,18 @@ class ReplayBuffer:
 
     def status(self) -> dict[str, Any]:
         segs = self.segments() if self.active else []
+        audio, since = self.audio, self.recording_since  # stop() can clear these mid-way
         return {
             "active": self.active,
             "encoder": self.encoder,
             "codec": self.codec,
             "buffer_seconds": self.cfg.buffer_seconds,
             "buffered_seconds": round(time.time() - segs[0][0], 1) if segs else 0,
-            "recording": self.recording_since is not None,
-            "recording_seconds": round(time.time() - self.recording_since, 1) if self.recording_since else None,
-            "audio": self.audio.names() if self.audio else [],
-            "audio_restarts": self.audio.restarts if self.audio else 0,
-            "error": self.error or (self.audio.last_error if self.audio else None),
+            "recording": since is not None,
+            "recording_seconds": round(time.time() - since, 1) if since else None,
+            "audio": audio.names() if audio else [],
+            "audio_restarts": audio.restarts if audio else 0,
+            "error": self.error or (audio.last_error if audio else None),
             "fps": self.cfg.fps,
         }
 

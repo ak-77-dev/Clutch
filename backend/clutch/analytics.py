@@ -97,6 +97,9 @@ def streaks(matches: Sequence[Match]) -> dict[str, Any]:
     kind: str | None = None
     run = 0
     for m in matches:
+        if m.result == "draw":  # a draw ends a streak; it isn't a loss
+            kind, run = None, 0
+            continue
         k = "win" if m.won else "loss"
         run = run + 1 if k == kind else 1
         kind = k
@@ -158,6 +161,8 @@ def teammates(matches: Sequence[Match], min_games: int = 3) -> list[dict[str, An
     names: dict[str, str] = {}
     for m in matches:
         for key, name in zip(m.team_keys, m.teammates, strict=False):
+            if not key:  # anonymous / unknown player: can't tell them apart across games
+                continue
             groups[key].append(m)
             names[key] = name
     rows = [

@@ -142,6 +142,12 @@ def test_dota_and_cs_trackers():
     assert dota.update(payload(2), now=15)[0].title == "Double kill"
     assert dota.update(payload(4), now=20)[0].title == "Ultra kill"
     assert dota.update(payload(5), now=60)[0].level == "kill"  # outside the 18 s window: a fresh streak
+    # Each kill within 18 s of the previous one keeps the chain going, however long it runs.
+    assert [dota.update(payload(k), now=t)[0].title for k, t in ((6, 75), (7, 90), (8, 105))] == [
+        "Double kill",
+        "Triple kill",
+        "Ultra kill",
+    ]
 
     cs = autoclip.CsTracker()
 
@@ -437,3 +443,29 @@ def test_sync_folder_off_or_unreachable_keeps_local_copy(tmp_path, monkeypatch):
     pc.set_keys({"RIOT_API_KEY": "RGAPI-still-here"})
     (tmp_path / "gone" / "clutch-sync.json").unlink()
     assert pc.sync.pull() is False and os.environ["RIOT_API_KEY"] == "RGAPI-still-here"
+
+
+def test_sync_folder_ignores_bad_values(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.delenv("LOL_PLATFORM", raising=False)
+    pc = _pc(tmp_path, "pc", monkeypatch)
+    cloud = tmp_path / "cloud"
+    pc.settings.update({"sync_folder": str(cloud)})
+    (cloud / "clutch-sync.json").write_text(
+        json.dumps({"keys": {"LOL_PLATFORM": "evil.example#"}, "settings": {"linked_profiles": ["not", "a", "map"]}}), encoding="utf-8"
+    )
+    time.sleep(0.05)
+    assert pc.sync.pull() is False and "region code" in pc.sync.status()["error"]
+    assert "LOL_PLATFORM" not in os.environ and pc.cfg.linked_profiles == {}
+    assert pc.keys_view()["sync"]["error"]  # the Settings page still loads, with the reason shown
+
+
+def test_region_keys_must_be_plain_codes(tmp_path, monkeypatch):
+    from clutch.local import keys
+
+    monkeypatch.setenv("CLUTCH_ENV_FILE", str(tmp_path / ".env"))
+    monkeypatch.delenv("LOL_PLATFORM", raising=False)
+    with pytest.raises(ValueError):
+        keys.update({"LOL_PLATFORM": "attacker.com/x"})
+    assert keys.update({"LOL_PLATFORM": "EUW1"})["lol_platform"] == "euw1"

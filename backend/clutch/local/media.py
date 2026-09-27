@@ -19,6 +19,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -379,8 +380,11 @@ class MediaService:
     # track's is re-read a few times before it's believed.
     ART_RETRIES = 4
 
-    def __init__(self, events: Any = None, *, backend: Any = None, mixer: Mixer | None = None) -> None:
+    def __init__(self, events: Any = None, *, backend: Any = None, mixer: Mixer | None = None, duck_file: Path | None = None) -> None:
         self.events = events
+        # Volumes Clutch turned down, on disk too: if Clutch dies mid-game, the next start
+        # puts the music back (Windows remembers per-app volume, so it'd stay low forever).
+        self.duck_file = duck_file
         self._backend = backend
         self.mixer = mixer
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -414,6 +418,7 @@ class MediaService:
                 self.mixer = Mixer()
             except Exception:
                 self.mixer = None
+        self._restore_leftover_duck()
         self._thread = threading.Thread(target=self._run, name="clutch-media", daemon=True)
         self._thread.start()
         self._ready.wait(10)
@@ -610,6 +615,8 @@ class MediaService:
                 self._ducked[procs] = now["level"]
                 self.mixer.write(procs, level=level)
                 n += 1
+        if n:
+            self._save_duck()
         return n
 
     def restore(self) -> int:
@@ -620,4 +627,28 @@ class MediaService:
             self.mixer.write(procs, level=level)
             del self._ducked[procs]
             n += 1
+        self._save_duck()
         return n
+
+    def _save_duck(self) -> None:
+        if not self.duck_file:
+            return
+        with contextlib.suppress(OSError):
+            if self._ducked:
+                self.duck_file.write_text(json.dumps([[list(p), lvl] for p, lvl in self._ducked.items()]), encoding="utf-8")
+            else:
+                self.duck_file.unlink(missing_ok=True)
+
+    def _restore_leftover_duck(self) -> None:
+        """Undo a duck a previous run never got to restore (a crash, a forced quit)."""
+        if not (self.duck_file and self.mixer):
+            return
+        try:
+            leftover = json.loads(self.duck_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        for procs, level in leftover:
+            with contextlib.suppress(Exception):
+                self.mixer.write(tuple(procs), level=float(level))
+        with contextlib.suppress(OSError):
+            self.duck_file.unlink()

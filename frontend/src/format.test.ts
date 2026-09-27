@@ -18,6 +18,7 @@ describe('format', () => {
   it('formats durations', () => {
     expect(fmtDuration(1695)).toBe('28:15')
     expect(fmtDuration(59)).toBe('0:59')
+    expect(fmtDuration(119.6)).toBe('2:00') // not 1:60
   })
 
   it('knows when lower is better', () => {
@@ -40,6 +41,7 @@ describe('format', () => {
     expect([fmtBytes(512), fmtBytes(1536), fmtBytes(5 * 1024 ** 3)]).toEqual(['512 B', '1.5 KB', '5.0 GB'])
     expect([fmtClock(75.4), fmtClock(3725)]).toEqual(['1:15', '1:02:05'])
     expect([monogram('VALORANT'), monogram('Call of Duty Modern Warfare')]).toEqual(['VAL', 'COD'])
+    expect(monogram('原神')).toBe('原神')
   })
 
   it('turns key presses into Electron accelerators', () => {
@@ -49,6 +51,11 @@ describe('format', () => {
     expect(k('F8', 'F8')).toBe('F8')
     expect(k('KeyK', 'k', { altKey: true })).toBe('Alt+K')
     expect(k('KeyK', 'k')).toBeNull() // bare letters would fire while typing
+    expect(k('ArrowRight', 'ArrowRight', { ctrlKey: true, altKey: true })).toBe('CommandOrControl+Alt+Right') // the default media keys
+    expect(k('ArrowLeft', 'ArrowLeft')).toBeNull() // bare arrows move you in game
+    expect(k('NumpadDecimal', '.', { ctrlKey: true })).toBe('CommandOrControl+numdec')
+    expect(k('Numpad7', '7')).toBe('num7')
+    expect(k('MediaPlayPause', 'MediaPlayPause')).toBe('MediaPlayPause')
   })
 
   it('estimates recording size', () => {

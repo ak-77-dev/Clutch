@@ -92,7 +92,10 @@ export function ClipViewer({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      // Space on a focused button presses that button: don't also toggle playback.
+      if (e.key === ' ' && tag === 'BUTTON') return
       const v = video.current
       if (e.key === 'Escape') onClose()
       else if (e.key === ',' && onPrev) onPrev()
@@ -102,7 +105,7 @@ export function ClipViewer({
         e.preventDefault()
         void (v.paused ? v.play() : v.pause())
       } else if (e.key === 'ArrowLeft') v.currentTime = Math.max(0, v.currentTime - 5)
-      else if (e.key === 'ArrowRight') v.currentTime = Math.min(dur, v.currentTime + 5)
+      else if (e.key === 'ArrowRight') v.currentTime = Math.min(dur || v.duration || v.currentTime + 5, v.currentTime + 5)
       else if (e.key.toLowerCase() === 'i') setRange(([, b]) => [Math.min(v.currentTime, b - 0.5), b])
       else if (e.key.toLowerCase() === 'o') setRange(([a]) => [a, Math.max(v.currentTime, a + 0.5)])
     }
@@ -174,9 +177,29 @@ export function ClipViewer({
   }
 
   async function saveTitle() {
-    if (title.trim() && title !== clip.title) {
+    if (!title.trim()) {
+      setTitle(clip.title) // an empty title isn't saved: put the old one back
+      return
+    }
+    if (title === clip.title) return
+    try {
       await desktop.updateClip(clip.id, { title })
       onChanged()
+    } catch (e) {
+      setTitle(clip.title)
+      toast({ title: 'Couldn’t rename the clip', sub: (e as Error).message, tone: 'error' })
+    }
+  }
+
+  async function toggleFavorite() {
+    const next = !fav
+    setFav(next)
+    try {
+      await desktop.updateClip(clip.id, { favorite: next })
+      onChanged()
+    } catch (e) {
+      setFav(!next)
+      toast({ title: 'Couldn’t update favorites', sub: (e as Error).message, tone: 'error' })
     }
   }
 
@@ -240,11 +263,7 @@ export function ClipViewer({
             className={`icon-btn ${fav ? 'on' : ''}`}
             aria-pressed={fav}
             title="Favorite"
-            onClick={async () => {
-              setFav(!fav)
-              await desktop.updateClip(clip.id, { favorite: !fav })
-              onChanged()
-            }}
+            onClick={() => void toggleFavorite()}
           >
             <StarIcon filled={fav} />
           </button>

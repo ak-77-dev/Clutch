@@ -58,7 +58,9 @@ function PlaytimeInner() {
 
   if (!view) return data.error ? <div className="card empty error">{data.error.message}</div> : <div className="skeleton" style={{ height: 400 }} />
   const { pt, byId, total, week, lastWeek, max, pad, current, best } = view
-  const top = pt.games[0]?.seconds ?? 1
+  // The API lists games by when they were last played: rank the bars by hours instead.
+  const byHours = [...pt.games].sort((a, b) => b.seconds - a.seconds)
+  const top = Math.max(byHours[0]?.seconds ?? 0, 1)
   const delta = lastWeek ? Math.round(((week - lastWeek) / lastWeek) * 100) : null
 
   return (
@@ -135,7 +137,7 @@ function PlaytimeInner() {
             </p>
           ) : (
             <div className="bars">
-              {pt.games.map((g) => {
+              {byHours.map((g) => {
                 const lib = byId.get(g.game_id)
                 return (
                   <Link key={g.game_id} to={`/library/${encodeURIComponent(g.game_id)}`} className="bar-row">

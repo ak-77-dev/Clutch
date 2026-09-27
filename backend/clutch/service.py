@@ -93,11 +93,14 @@ class Clutch:
         for mid in new_ids:
             try:
                 raw = p.fetch_match(profile, mid)
-            except ApiError:
+                fetched.append((mid, p.match_date(raw), raw))
+            except (ApiError, KeyError, TypeError, ValueError):
                 failed += 1
-                continue
-            fetched.append((mid, p.match_date(raw), raw))
         self.store.add_matches(game, key, fetched)
+        # A shared match's raw JSON is rewritten for every tracked player in it, which
+        # doesn't change their match counts: drop this game's parsed caches.
+        for cached in [k for k in self._parsed if k[0] == game]:
+            self._parsed.pop(cached, None)
         with contextlib.suppress(ApiError):  # rank refresh is best-effort
             self.store.save_profile(p.refresh_profile(profile))
         synced = self.store.mark_synced(game, key)
@@ -114,10 +117,19 @@ class Clutch:
         cached = self._parsed.get((game, key))
         if cached and cached[0] == len(raws):
             return cached[1]
-        parsed = [m for m in (p.parse(r, profile) for r in raws) if m is not None]
+        parsed = [m for m in (self._parse_one(p, r, profile) for r in raws) if m is not None]
         parsed.sort(key=lambda m: analytics.parse_date(m.date), reverse=True)
         self._parsed[(game, key)] = (len(raws), parsed)
         return parsed
+
+    @staticmethod
+    def _parse_one(p: GameProvider, raw: dict[str, Any], profile: Profile) -> Match | None:
+        """One odd upstream payload (a new mode, a field the API dropped) skips that match
+        instead of breaking the player's whole profile."""
+        try:
+            return p.parse(raw, profile)
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError, ZeroDivisionError):
+            return None
 
     def overview(self, game: str, key: str) -> dict[str, Any]:
         p = self.provider(game)

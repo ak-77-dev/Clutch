@@ -65,7 +65,17 @@
         $('game').textContent = p.game_name
         $('time').textContent = hours(p.seconds)
         const t = data.today
-        $('record').innerHTML = t ? `<span class="w">${t.wins}W</span> <span class="l">${t.losses}L</span>` : (data.rank || '—')
+        // Today's record once there's a game in it; until then the rank. (Built from text nodes:
+        // the rank label comes from a game's API.)
+        const rec = $('record')
+        rec.replaceChildren()
+        if (t && t.wins + t.losses) {
+          const w = Object.assign(document.createElement('span'), { className: 'w', textContent: `${t.wins}W` })
+          const l = Object.assign(document.createElement('span'), { className: 'l', textContent: `${t.losses}L` })
+          rec.append(w, ' ', l)
+        } else {
+          rec.textContent = data.rank || '—'
+        }
         $('clips').textContent = data.session_clips || 0
         const cap = data.daily_cap
         $('cap').hidden = !cap

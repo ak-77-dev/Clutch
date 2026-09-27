@@ -47,6 +47,11 @@ AV_OFFSET_S = 0.045
 # Stream-copied ADTS carries no priming info, so a decoded segment plays its input this
 # much late: encoder delay + decoder overlap, 2048 samples (measured: 41.4 ms onset shift).
 AAC_PRIMING_S = 2048 / 48_000
+# The PCM path (two tracks mixed, or no live encoder) encodes the clip's AAC at save time, and
+# that encoder's 1024-sample priming shows up as the sound starting late. Measured with a
+# flash + click whose true offset was taken from the loopback itself: +27 ms late on this path
+# vs +4 ms on the live path; skipping the priming's worth of audio brings it in line.
+PCM_ENCODE_DELAY_S = 1024 / 48_000
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 OUT_RATE, OUT_CHANNELS = 48_000, 2  # every clip's audio, whatever the device format
 
@@ -1136,7 +1141,8 @@ class ReplayBuffer:
                 args += ["-map", "0:v", "-map", "1:a", "-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
                 wavs = []
             else:
-                ranges = [(start - AV_OFFSET_S, end - AV_OFFSET_S) for start, end in runs]
+                shift = PCM_ENCODE_DELAY_S - AV_OFFSET_S
+                ranges = [(start + shift, end + shift) for start, end in runs]
                 ranges[-1] = (ranges[-1][0], now + 0.5)  # the last run is still being written
                 wavs = [t.extract_ranges(ranges, work / f"{t.name}.wav") for t in tracks]
             for w in wavs:

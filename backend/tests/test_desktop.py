@@ -501,3 +501,108 @@ def test_live_window_refuses_what_it_cannot_cover(tmp_path):
     track.write(100.02, b"\x00" * 960 * 4)
     assert track.live_window(50.0) is None  # the encoder started after the clip would begin
     track.close()
+
+
+# ── replay buffer lifecycle ──────────────────────────────────────────────────
+
+
+def test_closed_audio_track_never_writes_again(tmp_path):
+    track = AudioTrack("system", tmp_path)
+    track.write(1000.0, b"\x01\x00" * 2 * 480)
+    track.close()
+    before = sorted(p.name for p in tmp_path.iterdir())
+    track.fill_silence(1010.0)  # a late tick from the writer thread after close
+    track.write(1011.0, b"\x01\x00" * 2 * 480)
+    assert sorted(p.name for p in tmp_path.iterdir()) == before  # no new files, nothing held open
+
+
+class _FakeAudio:
+    def __init__(self):
+        self.closed = False
+        self.tracks = {}
+
+    def close(self):
+        self.closed = True
+
+
+class _DeadProc:
+    returncode = 1
+
+    def poll(self):
+        return 1
+
+
+def _fake_recorder(monkeypatch, capture, launched):
+    import io
+
+    class _Proc:
+        def __init__(self):
+            self.stderr, self.stdin, self.returncode = io.BytesIO(b""), io.BytesIO(), None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            self.returncode = -9
+
+    def popen(args, **_):
+        launched.append(args)
+        return _Proc()
+
+    monkeypatch.setattr(capture, "pick_encoder", lambda *a: "x264")
+    monkeypatch.setattr(capture.subprocess, "Popen", popen)
+    monkeypatch.setattr(capture, "_bind_to_backend", lambda proc: None)
+
+
+def test_a_dead_recorder_restarts_into_the_same_buffer(tmp_path, monkeypatch):
+    from clutch.local import capture
+
+    launched: list = []
+    _fake_recorder(monkeypatch, capture, launched)
+    audio = _FakeAudio()
+    buf = capture.ReplayBuffer(tmp_path / "spool", audio_factory=lambda spool, cfg: audio)
+    monkeypatch.setattr(buf, "_janitor_loop", lambda *a: None)
+    buf.start()
+    spool = buf.spool
+    for i in range(12):  # twelve seconds buffered
+        (spool / f"v_{i:08d}.ts").write_bytes(b"x")
+    buf.proc = _DeadProc()  # a fullscreen game knocked the recorder over
+    assert buf.armed and not buf.active
+
+    buf.start()  # the revive (or the next hotkey press)
+    assert buf.spool == spool and not audio.closed, "same buffer, audio never stopped"
+    assert len(list(spool.glob("v_*.ts"))) == 12, "nothing buffered was thrown away"
+    assert launched[-1][launched[-1].index("-segment_start_number") + 1] == "12", "numbering carries on"
+
+
+def test_starting_after_a_stop_begins_a_fresh_buffer(tmp_path, monkeypatch):
+    from clutch.local import capture
+
+    launched: list = []
+    _fake_recorder(monkeypatch, capture, launched)
+    buf = capture.ReplayBuffer(tmp_path / "spool", audio_factory=lambda spool, cfg: _FakeAudio())
+    monkeypatch.setattr(buf, "_janitor_loop", lambda *a: None)
+    (tmp_path / "spool" / "buffer_0").mkdir(parents=True)  # a leftover from an older run
+    buf.start()
+    first = buf.spool
+    buf.stop()
+    buf.start()
+    assert buf.spool != first
+    assert [d.name for d in (tmp_path / "spool").iterdir()] == [buf.spool.name], "old spools are removed"
+
+
+def test_audio_for_a_clip_with_gaps_skips_the_same_gaps(tmp_path):
+    track = AudioTrack("system", tmp_path)
+    # Ten seconds of audio whose sample value is the second it was captured in.
+    for sec in range(10):
+        track.write(1000.0 + sec + 1, (sec + 1).to_bytes(2, "little", signed=True) * 2 * 48_000)
+    # The video recorder was down from 1003 to 1006: the clip's video is 1000-1003 then 1006-1009.
+    out = track.extract_ranges([(1000.0, 1003.0), (1006.0, 1009.0)], tmp_path / "gaps.wav")
+    samples = _samples(out)
+    assert len(samples) == 6 * 48_000 * 2
+    second = lambda i: samples[i * 96_000 + 48_000]  # noqa: E731 - the middle of each second
+    assert [second(i) for i in range(6)] == [1, 2, 3, 7, 8, 9], "the gap (seconds 4-6) is cut from the audio too"

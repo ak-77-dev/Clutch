@@ -47,6 +47,11 @@ AV_OFFSET_S = 0.045
 # Stream-copied ADTS carries no priming info, so a decoded segment plays its input this
 # much late: encoder delay + decoder overlap, 2048 samples (measured: 41.4 ms onset shift).
 AAC_PRIMING_S = 2048 / 48_000
+# The PCM path (two tracks mixed, or no live encoder) encodes the clip's AAC at save time, and
+# that encoder's 1024-sample priming shows up as the sound starting late. Measured with a
+# flash + click whose true offset was taken from the loopback itself: +27 ms late on this path
+# vs +4 ms on the live path; skipping the priming's worth of audio brings it in line.
+PCM_ENCODE_DELAY_S = 1024 / 48_000
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 OUT_RATE, OUT_CHANNELS = 48_000, 2  # every clip's audio, whatever the device format
 
@@ -196,11 +201,14 @@ def kill_stale_recorders(spool_root: Path) -> int:
         return 0
     root = os.path.normcase(str(spool_root))
     killed = 0
-    for proc in psutil.process_iter(["name", "cmdline"]):
+    # Read each process on its own: process_iter(attrs=...) only skips access-denied
+    # processes, and one that's starting or exiting can raise OSError (WinError 87)
+    # from inside the iterator, which crashed the backend at startup.
+    for proc in psutil.process_iter():
         try:
-            name = (proc.info.get("name") or "").lower()
-            cmd = " ".join(proc.info.get("cmdline") or [])
-            if name.startswith("ffmpeg") and root in os.path.normcase(cmd):
+            if not proc.name().lower().startswith("ffmpeg"):
+                continue
+            if root in os.path.normcase(" ".join(proc.cmdline())):
                 proc.kill()
                 killed += 1
         except (psutil.Error, OSError):
@@ -529,6 +537,7 @@ class AudioTrack:
         self._file_start = 0.0
         self._cursor = 0.0  # wall time of the next sample to write
         self._lock = threading.Lock()
+        self._closed = False  # once closed, nothing may open or write a file in the spool again
         self._thread = threading.Thread(target=self._run, name=f"clutch-audio-{name}", daemon=True)
         self._stream = None
 
@@ -577,6 +586,7 @@ class AudioTrack:
                 pass
 
     def close(self) -> None:
+        self._closed = True
         self.detach()
         self.q.put(None)
         if self._thread.is_alive():
@@ -613,19 +623,26 @@ class AudioTrack:
         return [s[0] for s in segs], enc.base + segs[0][1] - AAC_PRIMING_S - a0
 
     def _run(self) -> None:
-        while True:
+        while not self._closed:
             try:
                 item = self.q.get(timeout=0.25)
             except queue.Empty:
-                self.fill_silence(time.time() - 0.15)  # nothing playing: keep the timeline moving
-                continue
+                item = False
             if item is None:
                 return
-            self.write(*item)
+            try:
+                if item is False:
+                    self.fill_silence(time.time() - 0.15)  # nothing playing: keep the timeline moving
+                else:
+                    self.write(*item)
+            except OSError:
+                time.sleep(0.5)  # disk full or the spool went away: drop this audio, keep the writer alive
 
     # timeline ---------------------------------------------------------------
     def write(self, arrived: float, data: bytes) -> None:
         with self._lock:
+            if self._closed:
+                return
             n = len(data) // self.frame_bytes
             begins = arrived - n / self.rate
             if self._fh is None:
@@ -646,6 +663,8 @@ class AudioTrack:
 
     def fill_silence(self, until: float) -> None:
         with self._lock:
+            if self._closed:
+                return
             if self._fh is None:
                 self._new_file(until)
                 return
@@ -689,6 +708,22 @@ class AudioTrack:
                 continue
             out.append((start, rate, ch, p))
         return sorted(out, key=lambda f: f[0])
+
+    def extract_ranges(self, ranges: list[tuple[float, float]], dest: Path) -> Path:
+        """Several ``[t0, t1)`` stretches of the timeline, back to back in one WAV: the audio for a
+        clip whose video has gaps (the recorder was restarted), so sound and picture stay in sync."""
+        if len(ranges) == 1:
+            return self.extract(*ranges[0], dest)
+        parts = [self.extract(a, b, dest.with_name(f"{dest.stem}_{i}.wav")) for i, (a, b) in enumerate(ranges)]
+        data_bytes = sum(max(0, part.stat().st_size - _WAV_HEADER_BYTES) for part in parts)
+        with open(dest, "wb") as out:
+            out.write(_wav_header(data_bytes))
+            for part in parts:
+                with open(part, "rb") as fh:
+                    fh.seek(_WAV_HEADER_BYTES)
+                    shutil.copyfileobj(fh, out, 1 << 20)
+                part.unlink(missing_ok=True)
+        return dest
 
     def extract(self, t0: float, t1: float, dest: Path) -> Path:
         """Write ``[t0, t1)`` of the timeline as a 48 kHz stereo WAV (silence where nothing was captured).
@@ -857,6 +892,7 @@ class ReplayBuffer:
         self._lock = threading.RLock()
         self._janitor: threading.Thread | None = None
         self._stop = threading.Event()
+        self._revivals: list[float] = []  # when FFmpeg was restarted after dying on its own
 
     @property
     def tracks(self) -> list[AudioTrack]:
@@ -867,7 +903,12 @@ class ReplayBuffer:
     def active(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
-    def ffmpeg_args(self, vendor: str, codec: str) -> list[str]:
+    @property
+    def armed(self) -> bool:
+        """A buffer run exists (its spool and audio), even while its video recorder is restarting."""
+        return self.spool is not None and not self._stop.is_set()
+
+    def ffmpeg_args(self, vendor: str, codec: str, start_number: int = 0) -> list[str]:
         height = RESOLUTIONS.get(self.cfg.resolution)
         src = f"ddagrab=output_idx={self.cfg.monitor}:framerate={self.cfg.fps}:draw_mouse=1"
         if height:  # downscale on the CPU (this FFmpeg build can't map D3D11 frames to CUDA)
@@ -882,6 +923,7 @@ class ReplayBuffer:
             *video_args(vendor, codec, self.cfg),
             "-g", str(self.cfg.fps), "-bf", "0",  # a keyframe every second: clips can start on any segment
             "-f", "segment", "-segment_time", str(SEGMENT_S), "-reset_timestamps", "1",
+            "-segment_start_number", str(start_number),  # a restarted recorder carries on the numbering
             str(self.spool / "v_%08d.ts"),
         ]  # fmt: skip
 
@@ -889,27 +931,45 @@ class ReplayBuffer:
         with self._lock:
             if self.active:
                 return
+            if self.armed:
+                # The run is alive but its video recorder died (a fullscreen game took the display,
+                # a driver reset): restart just the recorder, into the same spool, so everything
+                # already buffered (and the audio, which never stopped) is kept.
+                self._spawn()
+                return
+            if self.proc or self.audio or self.spool:
+                # Leftovers of a stopped run: make sure nothing of it is still writing.
+                _remove_later(self._teardown())
             self.cfg = cfg or self.cfg
             self.error = None
-            self.spool = self.spool_root / f"buffer_{int(time.time())}"
+            self._revivals = []
+            self.spool = self.spool_root / f"buffer_{int(time.time() * 1000)}"
             self.spool.mkdir(parents=True, exist_ok=True)
+            for old in self.spool_root.glob("buffer_*"):
+                if old != self.spool:
+                    _remove_later(old)  # leftovers whose files Windows hadn't released yet
             self.encoder = pick_encoder(self.cfg.encoder, self.cfg.codec)
             self.codec = resolve_codec(self.encoder, self.cfg.codec)
-            self._stderr = []
-            self.proc = subprocess.Popen(
-                [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *self.ffmpeg_args(self.encoder, self.codec)],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                creationflags=CREATE_NO_WINDOW,
-            )
-            _bind_to_backend(self.proc)
-            threading.Thread(target=self._drain_stderr, args=(self.proc,), daemon=True).start()
+            self._stop.clear()
+            self._spawn()
             self.audio = self.audio_factory(self.spool, self.cfg) if (self.cfg.system_audio or self.cfg.mic) else None
             self.started_at = time.time()
-            self._stop.clear()
-            self._janitor = threading.Thread(target=self._janitor_loop, name="clutch-buffer-janitor", daemon=True)
-            self._janitor.start()
+
+    def _spawn(self) -> None:
+        """Start the video recorder into the current spool, continuing its segment numbering (caller holds the lock)."""
+        numbers = [int(p.stem[2:]) for p in self.spool.glob("v_*.ts") if p.stem[2:].isdigit()]
+        self._stderr = []
+        self.proc = subprocess.Popen(
+            [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *self.ffmpeg_args(self.encoder, self.codec, max(numbers, default=-1) + 1)],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        _bind_to_backend(self.proc)
+        threading.Thread(target=self._drain_stderr, args=(self.proc,), daemon=True).start()
+        self._janitor = threading.Thread(target=self._janitor_loop, args=(self.proc,), name="clutch-buffer-janitor", daemon=True)
+        self._janitor.start()
 
     def _drain_stderr(self, proc: subprocess.Popen) -> None:
         for line in iter(proc.stderr.readline, b""):
@@ -918,22 +978,26 @@ class ReplayBuffer:
     def stop(self) -> None:
         with self._lock:
             self._stop.set()
-            proc, self.proc = self.proc, None
-            if proc and proc.poll() is None:
-                try:
-                    proc.stdin.write(b"q")
-                    proc.stdin.flush()
-                    proc.wait(timeout=5)
-                except Exception:
-                    proc.kill()
-            if self.audio:
-                self.audio.close()
-            self.audio = None
-            self.recording_since = None
-            spool, self.spool = self.spool, None
-            self.started_at = None
-        if spool:
-            shutil.rmtree(spool, ignore_errors=True)
+            spool = self._teardown()
+        _remove_later(spool)
+
+    def _teardown(self) -> Path | None:
+        """Stop FFmpeg and the audio recorders (caller holds the lock). Returns the spool to delete."""
+        proc, self.proc = self.proc, None
+        if proc and proc.poll() is None:
+            try:
+                proc.stdin.write(b"q")
+                proc.stdin.flush()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+        if self.audio:
+            self.audio.close()
+        self.audio = None
+        self.recording_since = None
+        spool, self.spool = self.spool, None
+        self.started_at = None
+        return spool
 
     def cleanup_stale(self) -> None:
         """Stop recorders and remove spools left by a previous run that crashed."""
@@ -942,11 +1006,15 @@ class ReplayBuffer:
             if d != self.spool:
                 shutil.rmtree(d, ignore_errors=True)
 
-    def _janitor_loop(self) -> None:  # pragma: no cover - timing loop around prune()
+    def _janitor_loop(self, proc: subprocess.Popen | None = None) -> None:  # pragma: no cover - timing loop around prune()
         while not self._stop.wait(AudioCapture.CHECK_S):
-            proc, audio = self.proc, self.audio  # stop() can clear these at any moment
-            if proc and proc.poll() is not None:
+            if proc is not None and self.proc is not proc:
+                return  # a newer recorder has its own janitor
+            audio = self.audio  # stop() can clear it at any moment
+            if proc is not None and proc.poll() is not None:
                 self.error = (self._stderr[-1] if self._stderr else "") or f"FFmpeg exited ({proc.returncode})"
+                print(f"[buffer] recorder exited ({proc.returncode}): {self.error}", flush=True)
+                self._revive()
                 return
             self.prune()
             if audio:
@@ -954,6 +1022,32 @@ class ReplayBuffer:
                     audio.check()
                 except Exception as exc:
                     audio.last_error = str(exc)
+
+    def _revive(self) -> None:
+        """FFmpeg died on its own (a fullscreen game grabbed the display, a driver reset): restart
+        the recorder into the same spool, so the buffer keeps everything it had and carries on.
+        Games can do this every time they switch display modes, so allow plenty of restarts, but
+        stop retrying if the recorder can't stay up at all (then the error is shown)."""
+        now = time.time()
+        self._revivals = [t for t in self._revivals if now - t < 600]
+        if len(self._revivals) >= 30 or self._stop.is_set():
+            print("[buffer] recorder keeps failing; giving up until the buffer is restarted", flush=True)
+            return
+        self._revivals.append(now)
+
+        def again() -> None:
+            time.sleep(1)  # let the display settle (mode switch, alt-tab into a fullscreen game)
+            with self._lock:
+                if self._stop.is_set() or self.active or not self.armed:
+                    return
+                try:
+                    self._spawn()
+                    self.error = None  # it's recording again
+                    print(f"[buffer] recorder restarted ({len(self._revivals)} in the last 10 min)", flush=True)
+                except Exception as exc:
+                    self.error = f"Couldn't restart the recorder: {exc}"
+
+        threading.Thread(target=again, name="clutch-buffer-revive", daemon=True).start()
 
     def prune(self) -> None:
         with self._lock:
@@ -991,7 +1085,7 @@ class ReplayBuffer:
         Returns what the clip index needs (duration, size) without probing the file again.
         """
         with self._lock:
-            if not self.active or not self.spool:
+            if not self.armed:
                 raise RuntimeError("The replay buffer isn't running")
             now = time.time()
             clock = [time.perf_counter()]
@@ -1014,13 +1108,22 @@ class ReplayBuffer:
                         continue
                 links.append(target)
             t0 = segs[0][0]
+            # Runs of back-to-back segments. A gap means the recorder was restarted (a game took
+            # the display): the video skips it, so the audio must skip it too or it drifts ahead.
+            runs: list[list[float]] = []  # [start, end] in wall time
+            for start, _path in segs:
+                if runs and start - runs[-1][1] < SEGMENT_S * 0.5:
+                    runs[-1][1] = start + SEGMENT_S
+                else:
+                    runs.append([start, start + SEGMENT_S])
             tracks = self.tracks
         try:
             # MPEG-TS joins byte-for-byte (it's how HLS works), so the segments are streamed into one
             # input: the concat demuxer would analyse every segment, ~35 ms each.
             args = ["-f", "mpegts", "-i", "pipe:0"]
             a0 = t0 - AV_OFFSET_S
-            live = tracks[0].live_window(a0) if len(tracks) == 1 else None
+            # The live AAC is one continuous stretch, so it only fits a clip without gaps.
+            live = tracks[0].live_window(a0) if len(tracks) == 1 and len(runs) == 1 else None
             if live:
                 # Fast path: the audio is already AAC; stream-copy it, starting at the right sample.
                 files, shift = live
@@ -1038,7 +1141,10 @@ class ReplayBuffer:
                 args += ["-map", "0:v", "-map", "1:a", "-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
                 wavs = []
             else:
-                wavs = [t.extract(a0, now + 0.5, work / f"{t.name}.wav") for t in tracks]
+                shift = PCM_ENCODE_DELAY_S - AV_OFFSET_S
+                ranges = [(start + shift, end + shift) for start, end in runs]
+                ranges[-1] = (ranges[-1][0], now + 0.5)  # the last run is still being written
+                wavs = [t.extract_ranges(ranges, work / f"{t.name}.wav") for t in tracks]
             for w in wavs:
                 args += ["-i", str(w)]
             if not live:
@@ -1075,7 +1181,7 @@ class ReplayBuffer:
 
     def start_recording(self) -> float:
         with self._lock:
-            if not self.active:
+            if not self.armed:
                 raise RuntimeError("The replay buffer isn't running")
             self.recording_since = time.time()
             return self.recording_since
@@ -1106,6 +1212,26 @@ class ReplayBuffer:
             "error": self.error or (audio.last_error if audio else None),
             "fps": self.cfg.fps,
         }
+
+
+def _remove_later(path: Path | None, tries: int = 30, wait: float = 2.0) -> None:
+    """Delete a spool folder, retrying in the background: on Windows a file stays locked for a
+    moment after its writer (FFmpeg, an audio recorder) closes it, and a single rmtree that
+    silently gave up is how hundreds of MB of stale buffer piled up on the system drive."""
+    if path is None:
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    if not path.exists():
+        return
+
+    def retry() -> None:
+        for _ in range(tries):
+            time.sleep(wait)
+            shutil.rmtree(path, ignore_errors=True)
+            if not path.exists():
+                return
+
+    threading.Thread(target=retry, name="clutch-spool-cleanup", daemon=True).start()
 
 
 def screenshot(dest: Path, monitor: int = 0) -> Path:

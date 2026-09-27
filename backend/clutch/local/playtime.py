@@ -91,10 +91,14 @@ def running_executables() -> set[str]:  # pragma: no cover - reads the live proc
 
     me = os.getpid()
     exes = set()
-    for proc in psutil.process_iter(["pid", "exe"]):
-        exe = proc.info.get("exe")
-        if exe and proc.info["pid"] != me:
-            exes.add(exe)
+    # One process at a time: a process that's starting or exiting can raise OSError from
+    # inside process_iter(attrs=...), which would fail the whole poll (no playtime at all).
+    for proc in psutil.process_iter():
+        try:
+            if proc.pid != me and (exe := proc.exe()):
+                exes.add(exe)
+        except (psutil.Error, OSError):
+            continue
     return exes
 
 

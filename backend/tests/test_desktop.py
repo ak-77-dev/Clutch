@@ -501,3 +501,60 @@ def test_live_window_refuses_what_it_cannot_cover(tmp_path):
     track.write(100.02, b"\x00" * 960 * 4)
     assert track.live_window(50.0) is None  # the encoder started after the clip would begin
     track.close()
+
+
+# ── replay buffer lifecycle ──────────────────────────────────────────────────
+
+
+def test_closed_audio_track_never_writes_again(tmp_path):
+    track = AudioTrack("system", tmp_path)
+    track.write(1000.0, b"\x01\x00" * 2 * 480)
+    track.close()
+    before = sorted(p.name for p in tmp_path.iterdir())
+    track.fill_silence(1010.0)  # a late tick from the writer thread after close
+    track.write(1011.0, b"\x01\x00" * 2 * 480)
+    assert sorted(p.name for p in tmp_path.iterdir()) == before  # no new files, nothing held open
+
+
+class _FakeAudio:
+    def __init__(self):
+        self.closed = False
+        self.tracks = {}
+
+    def close(self):
+        self.closed = True
+
+
+class _DeadProc:
+    returncode = 1
+
+    def poll(self):
+        return 1
+
+
+def test_restarting_after_ffmpeg_died_shuts_down_the_old_run(tmp_path, monkeypatch):
+    import subprocess
+
+    from clutch.local import capture
+
+    buf = capture.ReplayBuffer(tmp_path / "spool", audio_factory=lambda spool, cfg: _FakeAudio())
+    # A run whose FFmpeg died on its own: its audio recorders are still going, its spool is still there.
+    old_audio, old_spool = _FakeAudio(), tmp_path / "spool" / "buffer_1"
+    old_spool.mkdir(parents=True)
+    (old_spool / "system_1_48000_2.pcm").write_bytes(b"x")
+    (tmp_path / "spool" / "buffer_0").mkdir()  # an even older leftover
+    buf.proc, buf.audio, buf.spool = _DeadProc(), old_audio, old_spool
+
+    class _Proc:
+        stderr = __import__("io").BytesIO(b"")
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(capture, "pick_encoder", lambda *a: "x264")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _Proc())
+    monkeypatch.setattr(capture, "_bind_to_backend", lambda proc: None)
+    monkeypatch.setattr(buf, "_janitor_loop", lambda: None)
+    buf.start()
+    assert old_audio.closed, "the dead run's audio recorders are shut down"
+    assert [d.name for d in (tmp_path / "spool").iterdir()] == [buf.spool.name], "old spools are removed"

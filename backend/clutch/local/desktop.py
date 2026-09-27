@@ -236,6 +236,9 @@ class Desktop:
             self.sync.push()
         if self.buffer.active and not self.buffer.recording_since:
             new = self.capture_config()
+            # The clip length only changes how much is kept and cut: no need to restart FFmpeg
+            # (which would throw away everything buffered so far).
+            self.buffer.cfg.buffer_seconds = new.buffer_seconds
             if asdict(new) != asdict(self.buffer.cfg):
                 self.buffer.stop()  # restart so fps / quality / audio changes apply
                 self.buffer.start(new)

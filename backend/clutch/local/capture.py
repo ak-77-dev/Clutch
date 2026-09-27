@@ -196,11 +196,14 @@ def kill_stale_recorders(spool_root: Path) -> int:
         return 0
     root = os.path.normcase(str(spool_root))
     killed = 0
-    for proc in psutil.process_iter(["name", "cmdline"]):
+    # Read each process on its own: process_iter(attrs=...) only skips access-denied
+    # processes, and one that's starting or exiting can raise OSError (WinError 87)
+    # from inside the iterator, which crashed the backend at startup.
+    for proc in psutil.process_iter():
         try:
-            name = (proc.info.get("name") or "").lower()
-            cmd = " ".join(proc.info.get("cmdline") or [])
-            if name.startswith("ffmpeg") and root in os.path.normcase(cmd):
+            if not proc.name().lower().startswith("ffmpeg"):
+                continue
+            if root in os.path.normcase(" ".join(proc.cmdline())):
                 proc.kill()
                 killed += 1
         except (psutil.Error, OSError):
@@ -529,6 +532,7 @@ class AudioTrack:
         self._file_start = 0.0
         self._cursor = 0.0  # wall time of the next sample to write
         self._lock = threading.Lock()
+        self._closed = False  # once closed, nothing may open or write a file in the spool again
         self._thread = threading.Thread(target=self._run, name=f"clutch-audio-{name}", daemon=True)
         self._stream = None
 
@@ -577,6 +581,7 @@ class AudioTrack:
                 pass
 
     def close(self) -> None:
+        self._closed = True
         self.detach()
         self.q.put(None)
         if self._thread.is_alive():
@@ -613,19 +618,26 @@ class AudioTrack:
         return [s[0] for s in segs], enc.base + segs[0][1] - AAC_PRIMING_S - a0
 
     def _run(self) -> None:
-        while True:
+        while not self._closed:
             try:
                 item = self.q.get(timeout=0.25)
             except queue.Empty:
-                self.fill_silence(time.time() - 0.15)  # nothing playing: keep the timeline moving
-                continue
+                item = False
             if item is None:
                 return
-            self.write(*item)
+            try:
+                if item is False:
+                    self.fill_silence(time.time() - 0.15)  # nothing playing: keep the timeline moving
+                else:
+                    self.write(*item)
+            except OSError:
+                time.sleep(0.5)  # disk full or the spool went away: drop this audio, keep the writer alive
 
     # timeline ---------------------------------------------------------------
     def write(self, arrived: float, data: bytes) -> None:
         with self._lock:
+            if self._closed:
+                return
             n = len(data) // self.frame_bytes
             begins = arrived - n / self.rate
             if self._fh is None:
@@ -646,6 +658,8 @@ class AudioTrack:
 
     def fill_silence(self, until: float) -> None:
         with self._lock:
+            if self._closed:
+                return
             if self._fh is None:
                 self._new_file(until)
                 return
@@ -857,6 +871,7 @@ class ReplayBuffer:
         self._lock = threading.RLock()
         self._janitor: threading.Thread | None = None
         self._stop = threading.Event()
+        self._revivals: list[float] = []  # when FFmpeg was restarted after dying on its own
 
     @property
     def tracks(self) -> list[AudioTrack]:
@@ -889,10 +904,19 @@ class ReplayBuffer:
         with self._lock:
             if self.active:
                 return
+            # A run whose FFmpeg died (a fullscreen game took the display, the GPU reset) still
+            # has live audio recorders writing into its spool: shut it down before starting over,
+            # or they keep writing (and holding the files) forever.
+            if self.proc or self.audio or self.spool:
+                self._stop.set()
+                _remove_later(self._teardown())
             self.cfg = cfg or self.cfg
             self.error = None
-            self.spool = self.spool_root / f"buffer_{int(time.time())}"
+            self.spool = self.spool_root / f"buffer_{int(time.time() * 1000)}"
             self.spool.mkdir(parents=True, exist_ok=True)
+            for old in self.spool_root.glob("buffer_*"):
+                if old != self.spool:
+                    _remove_later(old)  # leftovers whose files Windows hadn't released yet
             self.encoder = pick_encoder(self.cfg.encoder, self.cfg.codec)
             self.codec = resolve_codec(self.encoder, self.cfg.codec)
             self._stderr = []
@@ -918,22 +942,26 @@ class ReplayBuffer:
     def stop(self) -> None:
         with self._lock:
             self._stop.set()
-            proc, self.proc = self.proc, None
-            if proc and proc.poll() is None:
-                try:
-                    proc.stdin.write(b"q")
-                    proc.stdin.flush()
-                    proc.wait(timeout=5)
-                except Exception:
-                    proc.kill()
-            if self.audio:
-                self.audio.close()
-            self.audio = None
-            self.recording_since = None
-            spool, self.spool = self.spool, None
-            self.started_at = None
-        if spool:
-            shutil.rmtree(spool, ignore_errors=True)
+            spool = self._teardown()
+        _remove_later(spool)
+
+    def _teardown(self) -> Path | None:
+        """Stop FFmpeg and the audio recorders (caller holds the lock). Returns the spool to delete."""
+        proc, self.proc = self.proc, None
+        if proc and proc.poll() is None:
+            try:
+                proc.stdin.write(b"q")
+                proc.stdin.flush()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+        if self.audio:
+            self.audio.close()
+        self.audio = None
+        self.recording_since = None
+        spool, self.spool = self.spool, None
+        self.started_at = None
+        return spool
 
     def cleanup_stale(self) -> None:
         """Stop recorders and remove spools left by a previous run that crashed."""
@@ -947,6 +975,7 @@ class ReplayBuffer:
             proc, audio = self.proc, self.audio  # stop() can clear these at any moment
             if proc and proc.poll() is not None:
                 self.error = (self._stderr[-1] if self._stderr else "") or f"FFmpeg exited ({proc.returncode})"
+                self._revive()
                 return
             self.prune()
             if audio:
@@ -954,6 +983,26 @@ class ReplayBuffer:
                     audio.check()
                 except Exception as exc:
                     audio.last_error = str(exc)
+
+    def _revive(self) -> None:
+        """FFmpeg died on its own (a fullscreen game grabbed the display, a driver reset): start
+        again, so the buffer doesn't sit silently off until someone notices. A few tries per
+        10 minutes, and never in the middle of a recording (that one is lost either way)."""
+        now = time.time()
+        self._revivals = [t for t in self._revivals if now - t < 600]
+        if self.recording_since is not None or len(self._revivals) >= 5 or self._stop.is_set():
+            return
+        self._revivals.append(now)
+
+        def again() -> None:
+            time.sleep(2)  # let the display settle (mode switch, alt-tab into a fullscreen game)
+            with self._lock:
+                if self._stop.is_set() or self.active:
+                    return
+                with contextlib.suppress(Exception):
+                    self.start()
+
+        threading.Thread(target=again, name="clutch-buffer-revive", daemon=True).start()
 
     def prune(self) -> None:
         with self._lock:
@@ -1106,6 +1155,26 @@ class ReplayBuffer:
             "error": self.error or (audio.last_error if audio else None),
             "fps": self.cfg.fps,
         }
+
+
+def _remove_later(path: Path | None, tries: int = 30, wait: float = 2.0) -> None:
+    """Delete a spool folder, retrying in the background: on Windows a file stays locked for a
+    moment after its writer (FFmpeg, an audio recorder) closes it, and a single rmtree that
+    silently gave up is how hundreds of MB of stale buffer piled up on the system drive."""
+    if path is None:
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    if not path.exists():
+        return
+
+    def retry() -> None:
+        for _ in range(tries):
+            time.sleep(wait)
+            shutil.rmtree(path, ignore_errors=True)
+            if not path.exists():
+                return
+
+    threading.Thread(target=retry, name="clutch-spool-cleanup", daemon=True).start()
 
 
 def screenshot(dest: Path, monitor: int = 0) -> Path:

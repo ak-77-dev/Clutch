@@ -379,6 +379,8 @@ class MediaService:
     # Apps can update the title before the artwork: artwork identical to the previous
     # track's is re-read a few times before it's believed.
     ART_RETRIES = 4
+    # How far the real position may drift from the UI's estimate before a correction is sent.
+    DRIFT_S = 1.5
 
     def __init__(self, events: Any = None, *, backend: Any = None, mixer: Mixer | None = None, duck_file: Path | None = None) -> None:
         self.events = events
@@ -393,6 +395,7 @@ class MediaService:
         self._stop = threading.Event()
         self._state: dict[str, Any] = {"available": False, "current": None, "sessions": [], "at": time.time()}
         self._sig: Any = None
+        self._published: dict[str, Any] | None = None  # the last state sent to the UI
         self._art: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self._held: dict[str, tuple[dict[str, Any], float]] = {}  # session id -> (last good session, seen at)
         self._last_art: dict[str, tuple[str, str]] = {}  # session id -> (art key, digest) of its last track
@@ -535,11 +538,34 @@ class MediaService:
             )
             for x in sessions
         ]
-        if sig != self._sig:
+        if sig != self._sig or self._drifted(state):
             self._sig = sig
+            self._published = state
             if self.events:
                 self.events.publish("media", **state)
         return state
+
+    def _drifted(self, state: dict[str, Any]) -> bool:
+        """Whether a session's position moved away from what the UI is showing.
+
+        The UI extrapolates from the last published state (position + time since),
+        so it only needs a new one when that guess goes wrong: a seek inside the
+        app, buffering, a stall, or an app that corrected its own position.
+        """
+        last = self._published
+        if not last:
+            return False
+        before = {x["id"]: x for x in last["sessions"]}
+        for x in state["sessions"]:
+            prev = before.get(x["id"])
+            if prev is None or prev["title"] != x["title"]:
+                continue  # new session or track: the signature already covers it
+            expected = prev["position"] + (state["at"] - last["at"] if prev["status"] == "playing" else 0.0)
+            if prev["duration"]:
+                expected = min(expected, prev["duration"])
+            if abs(x["position"] - expected) > self.DRIFT_S:
+                return True
+        return False
 
     def state(self) -> dict[str, Any]:
         return self._state if self._state["available"] else {**self._state, "error": self.error}

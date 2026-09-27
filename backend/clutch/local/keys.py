@@ -74,6 +74,12 @@ def update(values: dict[str, str | None]) -> dict[str, Any]:
         value = (value or "").strip()
         if any(c in value for c in "\r\n\"' "):
             raise ValueError(f"{name} can't contain spaces, quotes or line breaks")
+        if name in PLAIN and value:
+            # These become part of an API hostname (https://<platform>.api.riotgames.com), where
+            # anything but a plain code could send the key somewhere else.
+            value = value.lower()
+            if not re.fullmatch(r"[a-z0-9-]{1,16}", value):
+                raise ValueError(f"{name} must be a region code like na1 or steam")
         clean[name] = value or None
     write_env(env_path(), clean)
     for name, value in clean.items():

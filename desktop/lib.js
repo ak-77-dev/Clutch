@@ -53,7 +53,7 @@ function overlayFor(event) {
     case 'recording':
       return event.recording ? { title: 'Recording', sub: 'Press again to stop', tone: 'rec', sound: 'start' } : null
     case 'game_started':
-      return { title: event.game_name, sub: 'Clutch is tracking · replay buffer armed', tone: 'info', sound: null }
+      return { title: event.game_name, sub: event.armed === false ? 'Clutch is tracking playtime' : 'Clutch is tracking · replay buffer armed', tone: 'info', sound: null }
     case 'error':
       return { title: 'Clutch', sub: event.message, tone: 'error', sound: 'error' }
     case 'goal': {

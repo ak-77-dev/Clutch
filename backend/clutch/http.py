@@ -82,14 +82,21 @@ class JsonClient:
         self._sleep = sleep
 
     def get(self, url: str, params: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None) -> Any:
-        return self._request(url, params, headers).json()
+        resp = self._request(url, params, headers)
+        try:
+            return resp.json()
+        except ValueError as exc:  # an HTML error page from a CDN, a truncated body...
+            raise ApiError("upstream sent a response that isn't JSON", resp.status_code) from exc
 
     def get_ndjson(self, url: str, params: dict[str, Any] | None = None) -> list[Any]:
         """Newline-delimited JSON (e.g. Lichess game exports): one object per line."""
         import json
 
         text = self._request(url, params, {"Accept": "application/x-ndjson"}).text
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
+        try:
+            return [json.loads(line) for line in text.splitlines() if line.strip()]
+        except ValueError as exc:
+            raise ApiError("upstream sent a response that isn't JSON") from exc
 
     def _request(self, url: str, params: dict[str, Any] | None, headers: dict[str, str] | None) -> Any:
         extra = {"headers": headers} if headers else {}  # keeps simple test sessions working

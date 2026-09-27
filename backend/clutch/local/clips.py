@@ -65,6 +65,15 @@ def safe_name(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name).strip(" .") or "Desktop"
 
 
+def unique_path(path: Path) -> Path:
+    """``path``, or ``name (2).ext``, ``name (3).ext``... so an export never overwrites an earlier one."""
+    n, candidate = 2, path
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        n += 1
+    return candidate
+
+
 class ClipStore:
     def __init__(self, db_path: Path | str, thumbs_dir: Path) -> None:
         self.db = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -177,8 +186,10 @@ class ClipStore:
         if favorites:
             sql += " AND favorite = 1"
         if query:
-            sql += " AND (title LIKE ? OR game_name LIKE ?)"
-            args += [f"%{query}%", f"%{query}%"]
+            # % and _ typed in the search box are literal characters, not wildcards
+            like = "%" + re.sub(r"([\\%_])", r"\\\1", query) + "%"
+            sql += " AND (title LIKE ? ESCAPE '\\' OR game_name LIKE ? ESCAPE '\\')"
+            args += [like, like]
         sql += " ORDER BY created_at DESC"
         with self._lock:
             rows = self.db.execute(sql, args).fetchall()
@@ -250,7 +261,7 @@ class ClipStore:
         src = Path(clip["path"])
         if not 0 <= start < end:
             raise ValueError("Trim start must be before the end")
-        dest = src.with_name(f"{src.stem} (trim {start:.0f}-{end:.0f}s){src.suffix}")
+        dest = unique_path(src.with_name(f"{src.stem} (trim {start:.0f}-{end:.0f}s){src.suffix}"))
         if precise:
             # Re-encode so the cut lands on the exact frame (stream copy can only cut on keyframes).
             codec = {"nvenc": "h264_nvenc", "amf": "h264_amf", "qsv": "h264_qsv"}.get(pick_encoder(encoder), "libx264")
@@ -274,7 +285,9 @@ class ClipStore:
         clip = self.get(clip_id)
         src = Path(clip["path"])
         end = min(end if end is not None else (clip["duration"] or 10), start + 30)  # GIFs over 30 s are unusable
-        dest = src.with_name(f"{src.stem} {start:.0f}-{end:.0f}s.gif")
+        if not 0 <= start < end:
+            raise ValueError("The GIF's start must be before its end")
+        dest = unique_path(src.with_name(f"{src.stem} {start:.0f}-{end:.0f}s.gif"))
         # Two-pass palette: a per-clip palette looks far better than GIF's default 256 colours.
         chain = f"fps={fps},scale={width}:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4"
         result = run_ffmpeg(
@@ -291,11 +304,15 @@ class ClipStore:
         clip = self.get(clip_id)
         src = Path(clip["path"])
         end = end if end is not None else (clip["duration"] or 30)
+        if not 0 <= start < end:
+            raise ValueError("The export's start must be before its end")
+        if target_mb <= 0:
+            raise ValueError("The size limit must be above 0 MB")
         length = max(1.0, end - start)
         audio_kbps = 96
         video_kbps = max(150, int(target_mb * 8192 / length) - audio_kbps)
         height = 1080 if video_kbps > 6000 else 720 if video_kbps > 2000 else 480
-        dest = src.with_name(f"{src.stem} ({target_mb:.0f}MB){src.suffix}")
+        dest = unique_path(src.with_name(f"{src.stem} ({target_mb:.0f}MB){src.suffix}"))
         result = run_ffmpeg(
             [
                 "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(src),

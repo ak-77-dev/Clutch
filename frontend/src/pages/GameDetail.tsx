@@ -27,6 +27,7 @@ function GameDetailInner() {
   }, [id])
   const launch = useLaunch()
   const navigate = useNavigate()
+  const { toast } = useDesktop()
   const [heroFailed, setHeroFailed] = useState(false)
   const [logoFailed, setLogoFailed] = useState(false)
 
@@ -61,8 +62,12 @@ function GameDetailInner() {
               className="icon-btn"
               title={game.hidden ? 'Show in library' : 'Hide from library'}
               onClick={async () => {
-                await desktop.setHidden(game.id, !game.hidden)
-                navigate('/library')
+                try {
+                  await desktop.setHidden(game.id, !game.hidden)
+                  navigate('/library')
+                } catch (e) {
+                  toast({ title: 'Couldn’t change that', sub: (e as Error).message, tone: 'error' })
+                }
               }}
             >
               <EyeOffIcon />

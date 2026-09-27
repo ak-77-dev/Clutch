@@ -283,7 +283,8 @@ class DotaProvider(GameProvider):
             rank_value=rank_value,
             score_line=f"{mine or 0}–{theirs or 0}",
             teammates=[label(p) for p in mates],
-            team_keys=[str(p["account_id"]) for p in mates if is_known(p)],
+            # one key per teammate, in the same order as ``teammates`` ("" = anonymous: no duo stats)
+            team_keys=[str(p["account_id"]) if is_known(p) else "" for p in mates],
             items=[u for u in (item_icon(me.get(f"item_{i}")) for i in range(6)) if u],
             scoreboard=scoreboard,
             link=f"https://www.opendota.com/matches/{raw['match_id']}",

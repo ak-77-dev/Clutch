@@ -61,11 +61,11 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
       toast({ title: 'Clipping…', sub: e.game_name ?? 'Desktop' })
     } else if (e.type === 'clip_saved') {
       const c: Clip = e.clip
-      const label = c.kind === 'screenshot' ? 'Screenshot saved' : c.kind === 'recording' ? 'Recording saved' : 'Clip saved'
+      const label = { screenshot: 'Screenshot saved', recording: 'Recording saved', export: 'Export saved' }[c.kind as string] ?? 'Clip saved'
       // The thumbnail is rendered just after the clip is announced, so it isn't shown here.
       toast({ title: label, sub: `${c.game_name ?? 'Desktop'}${c.duration ? ` · ${Math.round(c.duration)}s` : ''}`, onClick: () => navigate(`/clips?open=${c.id}`) })
     } else if (e.type === 'game_started') {
-      toast({ title: `${e.game_name} is running`, sub: 'Tracking playtime · replay buffer armed' })
+      toast({ title: `${e.game_name} is running`, sub: e.armed === false ? 'Tracking playtime' : 'Tracking playtime · replay buffer armed' })
     } else if (e.type === 'session_end') {
       toast({ title: `${e.game_name} · ${fmtHours(e.seconds)}`, sub: `Session over${e.clips ? ` · ${e.clips} clip${e.clips > 1 ? 's' : ''}` : ''}` })
     } else if (e.type === 'stats_synced' && e.new > 0) {

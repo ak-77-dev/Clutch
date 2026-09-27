@@ -210,3 +210,20 @@ def test_same_album_art_is_accepted_after_a_few_looks():
     asyncio.run(m._refresh())
     keys = [asyncio.run(m._refresh())["sessions"][0]["art"] for _ in range(m.ART_RETRIES + 1)]
     assert keys[-1] == art_key(YT, "Another Way", "Sleep Theory")  # tracks from one album really do share art
+
+
+def test_duck_survives_a_crash(tmp_path):
+    duck_file = tmp_path / "ducked.json"
+    mixer = FakeMixer()
+    m = MediaService(None, backend=FakeBackend(), mixer=mixer, duck_file=duck_file)
+    m._state = {"available": True, "current": None, "sessions": [{"id": "Spotify.exe", "app": "spotify"}], "at": 0}
+    assert m.duck(0.3) == 1 and mixer.levels[("spotify.exe",)]["level"] == 0.3
+    assert duck_file.exists()  # Clutch is killed here, before restore()
+
+    after_crash = MediaService(None, backend=FakeBackend(), mixer=mixer, duck_file=duck_file)
+    after_crash._restore_leftover_duck()  # what start() does first
+    assert mixer.levels[("spotify.exe",)]["level"] == 0.8 and not duck_file.exists()
+
+    m.duck(0.3)
+    m.restore()  # the normal path clears the file too
+    assert not duck_file.exists()

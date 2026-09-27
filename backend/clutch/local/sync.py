@@ -15,6 +15,7 @@ private as the cloud folder it sits in.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import threading
@@ -37,6 +38,13 @@ def suggested_folder() -> str | None:
     return None
 
 
+def _valid_setting(name: str, value: Any) -> bool:
+    """The shape each synced setting must have (the file may be hand-edited or from a newer Clutch)."""
+    if name == "linked_profiles":
+        return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+    return isinstance(value, str)
+
+
 def local_keys() -> dict[str, str]:
     return {n: os.environ[n] for n in sorted(keys.NAMES) if os.environ.get(n)}
 
@@ -47,7 +55,7 @@ class SyncFolder:
     def __init__(self, desktop: Any) -> None:
         self.desktop = desktop
         self._lock = threading.RLock()
-        self._seen: float | None = None  # mtime of the version last read or written
+        self._seen: str | None = None  # digest of the version last read or written
         self._applying = False  # pulling: don't echo the changes back as a push
         self.last_synced: float | None = None
         self.error: str | None = None
@@ -72,12 +80,14 @@ class SyncFolder:
         }
 
     # ── the file ────────────────────────────────────────────────────────────
-    def _read(self) -> dict[str, Any] | None:
+    def _read(self) -> tuple[dict[str, Any] | None, str | None]:
+        """The file's contents and a digest of them (None, None when there's no file yet)."""
         try:
-            data = json.loads(self.file.read_text(encoding="utf-8"))  # type: ignore[union-attr]
+            raw = self.file.read_bytes()  # type: ignore[union-attr]
         except FileNotFoundError:
-            return None
-        return data if isinstance(data, dict) else None
+            return None, None
+        data = json.loads(raw.decode("utf-8"))
+        return (data if isinstance(data, dict) else None), hashlib.sha256(raw).hexdigest()
 
     def _snapshot(self) -> dict[str, Any]:
         cfg = self.desktop.cfg
@@ -99,10 +109,11 @@ class SyncFolder:
         path = self.file
         assert path is not None
         path.parent.mkdir(parents=True, exist_ok=True)
+        raw = json.dumps(data, indent=2).encode("utf-8")
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.write_bytes(raw)
         os.replace(tmp, path)  # a half-written file never reaches the other PCs
-        self._seen = path.stat().st_mtime
+        self._seen = hashlib.sha256(raw).hexdigest()
         self.last_synced = time.time()
 
     # ── pull / push ─────────────────────────────────────────────────────────
@@ -115,18 +126,21 @@ class SyncFolder:
                 self.error = None
                 return
             try:
-                existing = self._read()
+                existing, _ = self._read()
                 if existing:
-                    merged_keys = {**local_keys(), **(existing.get("keys") or {})}
-                    settings = dict(existing.get("settings") or {})
+                    theirs = existing.get("keys") if isinstance(existing.get("keys"), dict) else {}
+                    merged_keys = {**local_keys(), **theirs}
+                    settings = dict(existing.get("settings") or {}) if isinstance(existing.get("settings"), dict) else {}
                     mine = self.desktop.cfg
-                    settings["linked_profiles"] = {**mine.linked_profiles, **(settings.get("linked_profiles") or {})}
+                    linked = settings.get("linked_profiles")
+                    linked = linked if _valid_setting("linked_profiles", linked) else {}
+                    settings["linked_profiles"] = {**mine.linked_profiles, **linked}
                     for k in ("steamgriddb_key", "discord_client_id"):
                         settings[k] = settings.get(k) or getattr(mine, k)
                     self._apply({**existing, "keys": merged_keys, "settings": settings})
                 self._write(self._snapshot())
                 self.error = None
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, TypeError) as exc:
                 self.error = f"Couldn't use the sync folder: {exc}"
 
     def pull(self) -> bool:
@@ -134,20 +148,26 @@ class SyncFolder:
         with self._lock:
             if not self.file:
                 return False
+            # The file is a few KB, so compare contents: timestamps only tick every ~16 ms
+            # on Windows, and a cloud client may restore an older modified time.
             try:
-                mtime = self.file.stat().st_mtime
+                data, digest = self._read()
+            except FileNotFoundError:
+                return False
             except OSError:
                 return False  # folder offline / not synced down yet: keep the local copy
-            if mtime == self._seen:
-                return False
-            try:
-                data = self._read()
-            except (OSError, ValueError) as exc:
+            except ValueError as exc:  # half-downloaded or hand-edited
                 self.error = f"Couldn't read {FILE_NAME}: {exc}"
                 return False
-            self._seen = mtime
-            if data:
-                self._apply(data)
+            if digest is None or digest == self._seen:
+                return False
+            self._seen = digest
+            try:
+                if data:
+                    self._apply(data)
+            except (ValueError, TypeError) as exc:  # a value this PC won't accept (edited by hand, a newer Clutch...)
+                self.error = f"Couldn't apply {FILE_NAME}: {exc}"
+                return False
             self.last_synced = time.time()
             self.error = None
             return True
@@ -172,7 +192,9 @@ class SyncFolder:
             if changes:
                 self.desktop.set_keys(changes)
             cfg = self.desktop.cfg
-            patch = {k: v for k, v in (data.get("settings") or {}).items() if k in SETTINGS and v != getattr(cfg, k)}
+            patch = {
+                k: v for k, v in (data.get("settings") or {}).items() if k in SETTINGS and _valid_setting(k, v) and v != getattr(cfg, k)
+            }
             if patch:
                 self.desktop.settings.update(patch)
         finally:

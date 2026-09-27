@@ -60,7 +60,7 @@ function ClipsInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const all = clips.data?.items ?? []
+  const all = useMemo(() => clips.data?.items ?? [], [clips.data])
   const games = useMemo(() => {
     const m = new Map<string, { id: string; name: string; n: number }>()
     for (const c of all) {

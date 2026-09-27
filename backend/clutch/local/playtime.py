@@ -23,6 +23,7 @@ from typing import Any
 from clutch.local.library import Game
 
 MIN_SESSION_S = 60  # shorter blips (launcher splash screens, crashes on boot) aren't sessions
+GAP_S = 120  # no poll for this long = the PC slept or hibernated: that time isn't playtime
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -62,6 +63,7 @@ class Running:
     game: Game
     session_id: int
     started_at: float
+    last_seen: float = 0.0
 
 
 def _norm(path: str) -> str:
@@ -136,30 +138,45 @@ class PlaytimeTracker:
             game = matcher.match(exe)
             if game:
                 seen[game.id] = game
+        started: list[Game] = []
+        finished: list[tuple[Game, dict[str, Any]]] = []
         with self._lock:
+            # A long silence means the PC was asleep: end sessions at the last time they were
+            # seen, so the hours asleep aren't counted, and start fresh ones below.
+            for gid in [g for g, r in self.running.items() if now - r.last_seen > GAP_S]:
+                if done := self._finish(gid, self.running[gid].last_seen):
+                    finished.append(done)
             for gid, game in seen.items():
                 if gid in self.running:
+                    self.running[gid].last_seen = now
                     self.db.execute("UPDATE sessions SET ended_at = ? WHERE id = ?", (now, self.running[gid].session_id))
                 else:
                     cur = self.db.execute(
                         "INSERT INTO sessions (game_id, game_name, started_at, ended_at) VALUES (?, ?, ?, ?)", (gid, game.name, now, now)
                     )
-                    self.running[gid] = Running(game, cur.lastrowid, now)
-                    self.db.commit()
-                    for fn in self.on_start:
-                        _safe(fn, game)
+                    self.running[gid] = Running(game, cur.lastrowid, now, now)
+                    started.append(game)
             for gid in [g for g in self.running if g not in seen]:
-                self._finish(gid, now)
+                if done := self._finish(gid, now):
+                    finished.append(done)
             self.db.commit()
+        # Listeners start FFmpeg, write report cards...: run them without holding the lock.
+        for game, info in finished:
+            for fn in self.on_stop:
+                _safe(fn, game, info)
+        for game in started:
+            for fn in self.on_start:
+                _safe(fn, game)
 
-    def _finish(self, gid: str, now: float) -> None:
+    def _finish(self, gid: str, now: float) -> tuple[Game, dict[str, Any]] | None:
+        """End a session (caller holds the lock). Returns what to tell ``on_stop`` listeners, or None for a blip."""
         run = self.running.pop(gid)
         self.db.execute("UPDATE sessions SET ended_at = ?, active = 0 WHERE id = ?", (now, run.session_id))
         duration = now - run.started_at
         if duration < MIN_SESSION_S:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (run.session_id,))
             self.db.commit()
-            return
+            return None
         self.db.commit()
         info = {
             "id": run.session_id,
@@ -169,8 +186,7 @@ class PlaytimeTracker:
             "ended_at": now,
             "seconds": duration,
         }
-        for fn in self.on_stop:
-            _safe(fn, run.game, info)
+        return run.game, info
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -189,15 +205,18 @@ class PlaytimeTracker:
         self._stop.set()
         with self._lock:
             now = self._clock()
-            for gid in list(self.running):
-                self._finish(gid, now)
+            finished = [done for gid in list(self.running) if (done := self._finish(gid, now))]
+        for game, info in finished:
+            for fn in self.on_stop:
+                _safe(fn, game, info)
 
     # ── queries ─────────────────────────────────────────────────────────────
     def now_playing(self) -> list[dict[str, Any]]:
         now = self._clock()
+        with self._lock:  # the poller thread adds and removes entries
+            running = list(self.running.values())
         return [
-            {"game_id": r.game.id, "game_name": r.game.name, "started_at": r.started_at, "seconds": now - r.started_at}
-            for r in self.running.values()
+            {"game_id": r.game.id, "game_name": r.game.name, "started_at": r.started_at, "seconds": now - r.started_at} for r in running
         ]
 
     def summary(self) -> list[dict[str, Any]]:

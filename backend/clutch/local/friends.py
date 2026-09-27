@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from clutch.local.config import write_atomic
+
 REFRESH_S = 15 * 60
 
 
@@ -27,7 +29,7 @@ class FriendStore:
             self.friends = []
 
     def _save(self) -> None:
-        self.path.write_text(json.dumps(self.friends, indent=1), encoding="utf-8")
+        write_atomic(self.path, json.dumps(self.friends, indent=1))
 
     def add(self, game: str, key: str, name: str) -> dict[str, Any]:
         with self._lock:
@@ -52,7 +54,7 @@ class FriendStore:
             self._save()
 
     def due(self, now: float | None = None) -> list[dict[str, Any]]:
-        now = now or time.time()
+        now = time.time() if now is None else now
         return [f for f in self.friends if now - f.get("synced_at", 0) > REFRESH_S]
 
 

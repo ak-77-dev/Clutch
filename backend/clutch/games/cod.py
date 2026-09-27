@@ -202,7 +202,7 @@ class CodProvider(GameProvider):
                 "accuracy": round(100 * (st.get("shotsLanded") or 0) / shots, 1)
                 if shots
                 else (st.get("accuracy") and round(100 * st["accuracy"], 1)),
-                "headshot_pct": round(100 * (st.get("headshots") or 0) / k, 1) if k else 0.0,
+                "headshot_pct": round(100 * (st.get("headshots") or 0) / k, 1) if k else None,  # no kills: undefined, not 0%
                 "longest_streak": int(st.get("longestStreak") or 0),
             },
             score_line=score_line if None not in team_score else None,

@@ -251,7 +251,14 @@ function createWindow() {
     }
   })
   win.on('close', (e) => {
-    if (quitting || settings.minimize_to_tray === false) return
+    if (quitting) return
+    if (settings.minimize_to_tray === false) {
+      // Without close-to-tray, closing means quit: the window would be destroyed while the
+      // tray lived on, and clicking the tray would then try to show a window that's gone.
+      quitting = true
+      app.quit()
+      return
+    }
     e.preventDefault()
     win.hide()
     if (!toldAboutTray) {
@@ -262,7 +269,7 @@ function createWindow() {
 }
 
 function showWindow() {
-  if (!win) return
+  if (!win || win.isDestroyed()) return
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
@@ -319,6 +326,10 @@ function createPanel() {
 
 async function refreshPanel() {
   if (!panel) return
+  if (!settings.overlay_enabled && !discord?.ready) {
+    if (panel.isVisible()) panel.hide() // turned off in Settings while showing
+    return // nothing would show the session: skip the request while gaming
+  }
   let session = null
   try {
     session = await call('/api/desktop/session')
@@ -335,7 +346,8 @@ async function refreshPanel() {
 // ── Discord Rich Presence ──────────────────────────────────────────────────
 
 let presenceStart = null
-async function syncDiscord() {
+let discordConnecting = false
+async function syncDiscord(quiet = false) {
   const want = settings.discord_rpc && settings.discord_client_id
   if (!want) {
     if (discord) discord.close()
@@ -343,10 +355,16 @@ async function syncDiscord() {
     return
   }
   if (discord && discord.clientId === settings.discord_client_id && discord.ready) return
-  if (discord) discord.close()
-  discord = new DiscordPresence(settings.discord_client_id)
-  const ok = await discord.connect()
-  if (!ok) flash({ title: 'Discord', sub: `Rich Presence: ${discord.lastError}`, tone: 'error' })
+  if (discordConnecting) return
+  discordConnecting = true
+  try {
+    if (discord) discord.close()
+    discord = new DiscordPresence(settings.discord_client_id)
+    const ok = await discord.connect()
+    if (!ok && !quiet) flash({ title: 'Discord', sub: `Rich Presence: ${discord.lastError}`, tone: 'error' })
+  } finally {
+    discordConnecting = false
+  }
 }
 
 function updatePresence(session) {
@@ -517,8 +535,8 @@ function wireIpc() {
     const r = await dialog.showOpenDialog(win, { title: 'Add a game', properties: ['openFile'], filters: [{ name: 'Games', extensions: ['exe', 'lnk', 'url', 'bat'] }] })
     return r.canceled ? null : r.filePaths[0]
   })
-  ipcMain.handle('clutch:pick-folder', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Clips folder', properties: ['openDirectory', 'createDirectory'] })
+  ipcMain.handle('clutch:pick-folder', async (_e, title) => {
+    const r = await dialog.showOpenDialog(win, { title: typeof title === 'string' ? title.slice(0, 80) : 'Choose a folder', properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   })
   ipcMain.on('clutch:reload-hotkeys', () => void registerHotkeys()) // also re-reads overlay + Discord settings
@@ -530,7 +548,13 @@ function wireIpc() {
     if (/^https:\/\//.test(String(url))) shell.openExternal(String(url))
   })
   ipcMain.on('clutch:copy', (_e, text) => require('electron').clipboard.writeText(String(text).slice(0, 2000)))
-  ipcMain.on('clutch:login-item', (_e, open) => app.setLoginItemSettings({ openAtLogin: Boolean(open), args: ['--hidden'] }))
+  ipcMain.on('clutch:login-item', (_e, open) =>
+    app.setLoginItemSettings(
+      app.isPackaged
+        ? { openAtLogin: Boolean(open), args: ['--hidden'] }
+        : { openAtLogin: Boolean(open), path: process.execPath, args: [path.resolve(__dirname), '--hidden'] }, // dev: electron.exe <app>
+    ),
+  )
   ipcMain.handle('clutch:displays', () => {
     const primary = screen.getPrimaryDisplay().id
     // Desktop Duplication numbers outputs with the primary display first, then left to right.
@@ -554,32 +578,57 @@ async function boot() {
   await registerHotkeys()
   followEvents()
   setInterval(refreshPanel, 5000)
-  if (app.isPackaged) setTimeout(() => checkForUpdates(false), 15_000)
+  setInterval(() => syncDiscord(true), 60_000) // Discord restarted or started after Clutch: reconnect quietly
+  if (app.isPackaged) {
+    setTimeout(() => checkForUpdates(false), 15_000)
+    setInterval(() => checkForUpdates(false), 6 * 60 * 60 * 1000) // Clutch lives in the tray for days
+  }
 }
 
 // ── updates (installed builds only) ────────────────────────────────────────
 
-function checkForUpdates(manual) {
-  let autoUpdater
+let updater = null
+let manualCheck = false
+let announcedVersion = null
+
+/** electron-updater, with its listeners attached once (every check reuses them). */
+function getUpdater() {
+  if (updater) return updater
   try {
-    ;({ autoUpdater } = require('electron-updater'))
+    updater = require('electron-updater').autoUpdater
   } catch {
-    return
+    return null
   }
-  autoUpdater.autoDownload = true
-  autoUpdater.once('update-downloaded', (info) => {
+  updater.autoDownload = true
+  updater.on('update-downloaded', (info) => {
+    if (announcedVersion === info.version) return // periodic checks find the same download again
+    announcedVersion = info.version
     const n = new Notification({ title: `Clutch ${info.version} is ready`, body: 'Restart Clutch to update. It installs in a few seconds.', icon: path.join(ASSETS, 'icon.png') })
     n.on('click', () => {
       quitting = true
-      autoUpdater.quitAndInstall()
+      updater.quitAndInstall()
     })
     n.show()
   })
-  if (manual) {
-    autoUpdater.once('update-not-available', () => new Notification({ title: 'Clutch is up to date', body: `You're on ${app.getVersion()}.` }).show())
-    autoUpdater.once('error', (err) => new Notification({ title: 'Couldn’t check for updates', body: String(err?.message || err).slice(0, 120) }).show())
-  }
-  autoUpdater.checkForUpdates().catch(() => {})
+  updater.on('update-not-available', () => {
+    if (manualCheck) new Notification({ title: 'Clutch is up to date', body: `You're on ${app.getVersion()}.` }).show()
+    manualCheck = false
+  })
+  updater.on('update-available', () => {
+    manualCheck = false // the download finishing announces itself
+  })
+  updater.on('error', (err) => {
+    if (manualCheck) new Notification({ title: 'Couldn’t check for updates', body: String(err?.message || err).slice(0, 120) }).show()
+    manualCheck = false
+  })
+  return updater
+}
+
+function checkForUpdates(manual) {
+  const u = getUpdater()
+  if (!u) return
+  if (manual) manualCheck = true
+  u.checkForUpdates().catch(() => {})
 }
 
 app.on('before-quit', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Hotkey, Toggle } from '../components/Controls'
 import { MusicIcon, PlayIcon, VolumeIcon } from '../components/Icons'
 import { appAccent, Art, SeekBar, Transport, useMedia } from '../components/Music'
@@ -54,7 +54,7 @@ function MusicInner() {
   const { state, setState, run } = useMedia()
   const apps = useAsync(() => desktop.musicApps(), [])
   const [picked, setPicked] = useState<string | null>(null)
-  const sessions = state?.sessions.filter((s) => s.title) ?? []
+  const sessions = useMemo(() => state?.sessions.filter((s) => s.title) ?? [], [state])
   const s = sessions.find((x) => x.id === picked) ?? sessions[0] ?? null
 
   useEffect(() => {

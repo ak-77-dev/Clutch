@@ -9,6 +9,8 @@ import { estimateSize, fmtBytes } from '../format'
 const LOL_PLATFORMS = ['na1', 'euw1', 'eun1', 'kr', 'br1', 'la1', 'la2', 'oc1', 'tr1', 'ru', 'jp1', 'me1', 'ph2', 'sg2', 'th2', 'tw2', 'vn2']
 // Settings the Electron shell reads itself (global hotkeys, the in-game panel, Discord).
 const SHELL_KEYS = ['hotkey_', 'overlay_', 'discord_']
+// The backend's size limit counts GB as 1024³ bytes, like fmtBytes and Windows Explorer.
+const GIB = 1024 ** 3
 
 /** A text setting that saves when you leave the field or press Enter. */
 function TextSetting({ value, onSave, placeholder, secret = false, width = 260 }: { value: string; onSave: (v: string) => void; placeholder?: string; secret?: boolean; width?: number }) {
@@ -125,7 +127,7 @@ function SyncRow({ sync, save }: { sync: SyncStatus; save: (p: Partial<Settings>
         <button
           className="btn small ghost"
           onClick={async () => {
-            const dir = await bridge?.pickFolder()
+            const dir = await bridge?.pickFolder('Folder to sync keys and linked accounts through')
             if (dir) void save({ sync_folder: dir })
           }}
         >
@@ -243,6 +245,8 @@ function StorageCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) =>
                     const r = await desktop.cleanStorage()
                     toast({ title: `Cleaned up ${r.count} file${r.count === 1 ? '' : 's'}`, sub: `${fmtBytes(r.bytes)} freed · in the Recycle Bin` })
                     setInfo(await desktop.storage())
+                  } catch (e) {
+                    toast({ title: 'Couldn’t clean up', sub: (e as Error).message, tone: 'error' })
                   } finally {
                     setCleaning(false)
                   }
@@ -257,8 +261,8 @@ function StorageCard({ s, save }: { s: Settings; save: (p: Partial<Settings>) =>
             )}
           </div>
           {s.storage_max_gb > 0 && (
-            <div className={`goal-bar ${info.bytes > s.storage_max_gb * 1e9 ? 'over' : ''}`}>
-              <i style={{ width: `${Math.min(100, (info.bytes / (s.storage_max_gb * 1e9)) * 100)}%` }} />
+            <div className={`goal-bar ${info.bytes > s.storage_max_gb * GIB ? 'over' : ''}`}>
+              <i style={{ width: `${Math.min(100, (info.bytes / (s.storage_max_gb * GIB)) * 100)}%` }} />
             </div>
           )}
         </div>
@@ -560,7 +564,7 @@ function SettingsInner() {
               <button
                 className="btn"
                 onClick={async () => {
-                  const dir = await bridge?.pickFolder()
+                  const dir = await bridge?.pickFolder('Clips folder')
                   if (dir) void save({ clips_dir: dir })
                 }}
               >

@@ -24,7 +24,7 @@ class CleanupPlan:
 
 def plan_cleanup(clips: list[dict[str, Any]], *, max_days: int = 0, max_gb: float = 0, now: float | None = None) -> CleanupPlan:
     """Which clips a cleanup would remove (pure: the caller decides whether to act)."""
-    now = now or time.time()
+    now = time.time() if now is None else now
     candidates = sorted((c for c in clips if not c["favorite"] and c.get("exists", True)), key=lambda c: c["created_at"])
     chosen: dict[int, str] = {}
     if max_days > 0:

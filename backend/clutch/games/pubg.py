@@ -207,7 +207,7 @@ class PubgProvider(GameProvider):
             },
             score_line=f"#{place} of {len(rosters)}",
             teammates=[p.get("name") or "?" for p in mine["players"] if p is not me],
-            team_keys=[p.get("playerId") for p in mine["players"] if p is not me and p.get("playerId")],
+            team_keys=[p.get("playerId") or "" for p in mine["players"] if p is not me],  # aligned with teammates
             scoreboard=[
                 ScoreRow(
                     name=p.get("name") or "?",

@@ -20,7 +20,9 @@ function FriendsInner() {
   const games = useGames()
   const { toast } = useDesktop()
   const feed = useAsync(() => desktop.friends(), [])
-  const [game, setGame] = useState(games.find((g) => g.configured)?.id ?? games[0]?.id ?? '')
+  const [picked, setGame] = useState<string | null>(null)
+  // The game list loads after this page can first render: default once it's there.
+  const game = picked ?? games.find((g) => g.configured)?.id ?? games[0]?.id ?? ''
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
   const [refreshing, setRefreshing] = useState(false)

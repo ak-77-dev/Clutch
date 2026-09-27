@@ -246,7 +246,7 @@ class DeadlockProvider(GameProvider):
             rank_value=rank_value,
             score_line=f"{my_kills}–{opp_kills}",
             teammates=[label(p) for p in mates],
-            team_keys=[str(p["account_id"]) for p in mates if p.get("account_id")],
+            team_keys=[str(p["account_id"]) if p.get("account_id") else "" for p in mates],  # aligned with teammates
             scoreboard=scoreboard,
             link=f"https://statlocker.gg/match/{raw['match_id']}",
         )

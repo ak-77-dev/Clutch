@@ -163,7 +163,8 @@ class Cs2Provider(GameProvider):
             date=self.match_date(raw),
             mode=raw.get("competition_name") or (raw.get("game_mode") or "5v5"),
             duration_s=float(max(0, finished - started)),
-            result="draw" if my_score == their_score else ("win" if won else "loss"),
+            # FACEIT's win flag first: a missing score reads as 0-0, which isn't a draw.
+            result="win" if won else ("draw" if my_score == their_score and my_score > 0 else "loss"),
             character=mp,
             character_icon=None,
             map=mp,
@@ -180,7 +181,7 @@ class Cs2Provider(GameProvider):
             },
             score_line=f"{my_score}–{their_score}",
             teammates=[p.get("nickname") or "?" for p in mine["players"] if p is not me],
-            team_keys=[p["player_id"] for p in mine["players"] if p is not me and p.get("player_id")],
+            team_keys=[p.get("player_id") or "" for p in mine["players"] if p is not me],  # aligned with teammates
             scoreboard=[
                 ScoreRow(
                     name=p.get("nickname") or "?",

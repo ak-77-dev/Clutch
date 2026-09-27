@@ -9,6 +9,7 @@ the first upload. Hosts need no account:
 
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 
 import requests
@@ -31,13 +32,20 @@ def upload(path: Path, host: str = "catbox", session: requests.Session | None = 
     spec = HOSTS.get(host)
     if spec is None:
         raise ShareError(f"Unknown host: {host}")
+    if not path.is_file():
+        raise ShareError("The file was moved or deleted, so there's nothing to upload.")
     size_mb = path.stat().st_size / 1024 / 1024
     if size_mb > spec["limit_mb"]:
         raise ShareError(f"{size_mb:.0f} MB is over {host}'s {spec['limit_mb']} MB limit. Export a smaller copy first.")
     http = session or requests.Session()
     try:
         with open(path, "rb") as fh:
-            resp = http.post(spec["url"], data=spec["fields"], files={"fileToUpload": (path.name, fh, "video/mp4")}, timeout=timeout)
+            resp = http.post(
+                spec["url"],
+                data=spec["fields"],
+                files={"fileToUpload": (path.name, fh, mimetypes.guess_type(path.name)[0] or "application/octet-stream")},
+                timeout=timeout,
+            )
     except requests.RequestException as exc:
         raise ShareError(f"Upload failed: {exc}") from exc
     link = resp.text.strip()

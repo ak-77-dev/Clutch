@@ -37,7 +37,7 @@ function LibraryInner() {
   const launch = useLaunch()
   const { toast } = useDesktop()
 
-  const games = lib.data ?? []
+  const games = useMemo(() => lib.data ?? [], [lib.data])
   const sources = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const g of games) counts[g.source] = (counts[g.source] ?? 0) + 1

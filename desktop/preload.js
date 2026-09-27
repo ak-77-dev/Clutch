@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('clutchDesktop', {
   packaged: info.packaged,
   checkUpdates: () => ipcRenderer.send('clutch:check-updates'),
   pickExecutable: () => ipcRenderer.invoke('clutch:pick-exe'),
-  pickFolder: () => ipcRenderer.invoke('clutch:pick-folder'),
+  pickFolder: (title) => ipcRenderer.invoke('clutch:pick-folder', title),
   reloadHotkeys: () => ipcRenderer.send('clutch:reload-hotkeys'),
   setLoginItem: (open) => ipcRenderer.send('clutch:login-item', open),
   displays: () => ipcRenderer.invoke('clutch:displays'),

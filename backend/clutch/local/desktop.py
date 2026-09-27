@@ -25,7 +25,7 @@ from clutch.local import edit, share
 from clutch.local.art import ArtResolver
 from clutch.local.autoclip import AutoClipper, GsiServer, Highlight, LeaguePoller, gsi_installed, gsi_token, install_gsi
 from clutch.local.capture import CaptureConfig, ReplayBuffer, screenshot
-from clutch.local.clips import ClipStore
+from clutch.local.clips import ClipStore, unique_path
 from clutch.local.config import Settings, SettingsStore, data_dir
 from clutch.local.friends import FriendStore
 from clutch.local.friends import feed as friends_feed
@@ -37,6 +37,7 @@ from clutch.local.reports import ReportStore, iso_ts, match_window, summarize_ma
 from clutch.local.storage import plan_cleanup
 from clutch.local.sync import SETTINGS as SYNCED_SETTINGS
 from clutch.local.sync import SyncFolder
+from clutch.service import derived_ranks
 
 
 class EventBus:
@@ -91,10 +92,11 @@ class Desktop:
         )
         self.gsi = GsiServer(gsi_token(self.home), self._highlight)
         self.league = LeaguePoller(self._highlight, lambda: "riot:league_of_legends" in self.playtime.running)
-        self.media = MediaService(self.events)
+        self.media = MediaService(self.events, duck_file=self.home / "ducked.json")
         self._auto_buffer = False  # started by a game launch (so stop it when games close)
         self._stop = threading.Event()
         self._lock = threading.RLock()
+        self._storage_lock = threading.Lock()
         self.playtime.on_start.append(self._game_started)
         self.playtime.on_stop.append(self._game_stopped)
         self.settings.on_change(self._settings_changed)
@@ -143,7 +145,7 @@ class Desktop:
         )
 
     def current_game(self) -> Game | None:
-        running = sorted(self.playtime.running.values(), key=lambda r: r.started_at, reverse=True)
+        running = sorted(list(self.playtime.running.values()), key=lambda r: r.started_at, reverse=True)  # snapshot: the poller mutates it
         return running[0].game if running else None
 
     def _warm_art(self) -> None:
@@ -155,7 +157,9 @@ class Desktop:
 
     # ── game lifecycle ──────────────────────────────────────────────────────
     def _game_started(self, game: Game) -> None:
-        self.events.publish("game_started", game_id=game.id, game_name=game.name, stats_game=stats_game_for(game))
+        self.events.publish(
+            "game_started", game_id=game.id, game_name=game.name, stats_game=stats_game_for(game), armed=self.cfg.auto_buffer
+        )
         if self.cfg.music_duck:
             with contextlib.suppress(Exception):
                 self.media.duck(self.cfg.music_duck_level / 100)
@@ -397,13 +401,20 @@ class Desktop:
     def enforce_storage(self) -> dict[str, Any] | None:
         if not (self.cfg.storage_max_days or self.cfg.storage_max_gb):
             return None
-        plan = self.storage_plan()
-        for clip_id in plan["clip_ids"]:
-            with contextlib.suppress(Exception):
-                self.clips.delete(clip_id)
-        if plan["count"]:
-            self.events.publish("storage_cleaned", count=plan["count"], bytes=plan["bytes"])
-        return plan
+        # Every save and the minutely job call this; one pass at a time, so two can't
+        # plan the same deletions and announce the cleanup twice.
+        if not self._storage_lock.acquire(blocking=False):
+            return None
+        try:
+            plan = self.storage_plan()
+            for clip_id in plan["clip_ids"]:
+                with contextlib.suppress(Exception):
+                    self.clips.delete(clip_id)
+            if plan["count"]:
+                self.events.publish("storage_cleaned", count=plan["count"], bytes=plan["bytes"])
+            return plan
+        finally:
+            self._storage_lock.release()
 
     # ── clips <-> matches ───────────────────────────────────────────────────
     def _stats_game_of(self, library_id: str | None) -> str | None:
@@ -489,7 +500,7 @@ class Desktop:
     def session_view(self) -> dict[str, Any]:
         now = time.time()
         playing = self.playtime.now_playing()
-        today = self.playtime.daily(1)[-1] if self.playtime.daily(1) else {"seconds": 0}
+        today = (self.playtime.daily(1) or [{"seconds": 0}])[-1]
         current = playing[0] if playing else None
         out: dict[str, Any] = {"playing": current, "today_seconds": today["seconds"], "buffer": self.buffer.status()}
         track = self.media.now_playing()
@@ -501,13 +512,17 @@ class Desktop:
             key = self.cfg.linked_profiles.get(game or "")
             if self.stats and game and key:
                 with contextlib.suppress(Exception):
-                    todays = [m for m in self.stats.matches(game, key) if iso_ts(m.date) >= now - 86400 * 0.75]
+                    matches = self.stats.matches(game, key)  # cached: cheap every few seconds
+                    todays = [m for m in matches if iso_ts(m.date) >= now - 86400 * 0.75]
                     out["today"] = {"wins": sum(m.won for m in todays), "losses": sum(m.result == "loss" for m in todays)}
-                    rank = (self.stats.overview(game, key)["profile"].get("ranks") or [{}])[0]
-                    out["rank"] = rank.get("label")
-        caps = [g for g in self.goals_view() if g["kind"] == "daily_cap"]
+                    profile = self.stats.store.profile(game, key)
+                    ranks = (profile.ranks if profile else None) or derived_ranks(matches)
+                    out["rank"] = (ranks or [{}])[0].get("label")
+        # The overlay polls this every few seconds while a game runs: evaluate only the daily
+        # cap from playtime, not every goal (win-rate and rank goals build full stats overviews).
+        caps = [g for g in self.goals.all() if g["kind"] == "daily_cap"]
         if caps:
-            out["daily_cap"] = caps[0]["progress"]
+            out["daily_cap"] = evaluate(caps[0], {"daily": self.playtime.daily(2), "now": now})
         return out
 
     # ── auto-clip integrations ──────────────────────────────────────────────
@@ -555,6 +570,8 @@ class Desktop:
         return clip
 
     def make_montage(self, clip_ids: list[int], title: str | None = None) -> dict[str, Any]:
+        if len(clip_ids) < 2:
+            raise ValueError("Pick at least two clips for a montage")
         sources = [self.clips.get(i) for i in clip_ids]
         first = sources[0]
         dest = ClipStore.new_path(self.clips_root, first["game_name"], "montage")
@@ -564,21 +581,21 @@ class Desktop:
     def make_caption(self, clip_id: int, text: str, position: str = "bottom") -> dict[str, Any]:
         src = self.clips.get(clip_id)
         path = Path(src["path"])
-        dest = path.with_name(f"{path.stem} (captioned){path.suffix}")
+        dest = unique_path(path.with_name(f"{path.stem} (captioned){path.suffix}"))
         edit.caption(path, dest, text, position=position, encoder=self.cfg.encoder)
         return self._export(src, dest, f"{src['title']} · “{text[:40]}”")
 
     def make_vertical(self, clip_id: int, mode: str = "blur") -> dict[str, Any]:
         src = self.clips.get(clip_id)
         path = Path(src["path"])
-        dest = path.with_name(f"{path.stem} (vertical){path.suffix}")
+        dest = unique_path(path.with_name(f"{path.stem} (vertical){path.suffix}"))
         edit.vertical(path, dest, mode=mode, encoder=self.cfg.encoder)
         return self._export(src, dest, f"{src['title']} (9:16)")
 
     def make_without_mic(self, clip_id: int) -> dict[str, Any]:
         src = self.clips.get(clip_id)
         path = Path(src["path"])
-        dest = path.with_name(f"{path.stem} (no mic){path.suffix}")
+        dest = unique_path(path.with_name(f"{path.stem} (no mic){path.suffix}"))
         edit.without_mic(path, dest)
         return self._export(src, dest, f"{src['title']} (no mic)")
 

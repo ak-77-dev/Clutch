@@ -180,7 +180,7 @@ class DotaTracker:
         self.recent: list[float] = []
 
     def update(self, payload: dict[str, Any], now: float | None = None) -> list[Highlight]:
-        now = now or time.time()
+        now = time.time() if now is None else now
         player = payload.get("player") or {}
         match = (payload.get("map") or {}).get("matchid")
         kills = player.get("kills")
@@ -193,7 +193,11 @@ class DotaTracker:
         self.kills = kills
         if gained <= 0:
             return []
-        self.recent = [t for t in self.recent if now - t <= DOTA_MULTIKILL_WINDOW_S] + [now] * gained
+        # Dota's rule: each kill within 18 s of the previous one continues the chain
+        # (a Rampage can take a minute), so only a longer pause starts a new one.
+        if self.recent and now - self.recent[-1] > DOTA_MULTIKILL_WINDOW_S:
+            self.recent = []
+        self.recent += [now] * gained
         n = len(self.recent)
         if n >= 2:
             return [Highlight("steam:570", "ace" if n >= 4 else "multikill", DOTA_NAMES.get(min(n, 5), "Rampage"))]
@@ -312,7 +316,7 @@ class GsiServer:
             def do_POST(self) -> None:  # noqa: N802 - http.server API
                 game = self.path.rstrip("/").rsplit("/", 1)[-1]
                 try:
-                    body = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 2_000_000))
+                    body = self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), 2_000_000)))
                     server.handle(game, json.loads(body or b"{}"))
                 except (ValueError, OSError):
                     pass

@@ -235,7 +235,7 @@ class ValorantProvider(GameProvider):
 
         st = me.get("stats") or {}
         k, d, a = st.get("kills", 0), st.get("deaths", 0), st.get("assists", 0)
-        shots = (st.get("headshots", 0) + st.get("bodyshots", 0) + st.get("legshots", 0)) or 1
+        shots = st.get("headshots", 0) + st.get("bodyshots", 0) + st.get("legshots", 0)
         team = (me.get("team") or "").lower()
         teams = raw.get("teams") or {}
         mine = teams.get(team) or {}
@@ -288,7 +288,7 @@ class ValorantProvider(GameProvider):
                 "kd": round(k / max(d, 1), 2),
                 "acs": per_round(st.get("score", 0)),
                 "adr": per_round(me.get("damage_made") or 0),
-                "hs_pct": round(100 * st.get("headshots", 0) / shots, 1),
+                "hs_pct": round(100 * st.get("headshots", 0) / shots, 1) if shots else None,  # no shot data: not 0%
                 "deaths_per_round": per_round(d, 3),
                 "assists_per_round": per_round(a, 3),
             },

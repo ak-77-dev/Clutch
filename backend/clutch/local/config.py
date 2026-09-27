@@ -23,6 +23,13 @@ def data_dir() -> Path:
     return base
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """Write via a temp file and rename, so a crash mid-write can't leave a half-written (unreadable) file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 ALREADY_RUNNING = 75  # exit code: another desktop backend owns this data folder
 
 
@@ -172,7 +179,7 @@ class SettingsStore:
             if data["sync_folder"] and not Path(data["sync_folder"]).parent.is_dir():
                 raise ValueError("The sync folder's location doesn't exist")
             self.settings = Settings(**data)
-            self.path.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
+            write_atomic(self.path, json.dumps(asdict(self.settings), indent=2))
         for fn in self._listeners:
             fn(self.settings)
         return self.settings

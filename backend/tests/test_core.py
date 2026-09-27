@@ -223,3 +223,19 @@ def test_store_links_one_match_to_many_players(tmp_path):
     st.add_matches("g", "a", [("m1", "2026-01-01", {"x": 1})])
     st.add_matches("g", "b", [("m1", "2026-01-01", {"x": 2})])
     assert st.raw_matches("g", "a") == [{"x": 2}] and st.known_match_ids("g", "b") == {"m1"}
+
+
+def test_demo_profile_link_works_on_a_fresh_install():
+    from clutch.games import default_providers
+    from clutch.service import Clutch
+    from clutch.store import Store
+
+    svc = Clutch(Store(":memory:"), default_providers())
+    key = svc.provider("lol").demo_profile().key
+    ov = svc.overview("lol", key)  # nobody searched for "demo" first
+    assert ov["profile"]["demo"] and ov["overview"]["summary"]["games"] > 0
+    try:
+        svc.overview("lol", "demo-someone-else")
+        raise AssertionError("expected LookupError")
+    except LookupError:
+        pass

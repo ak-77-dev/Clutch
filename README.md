@@ -181,9 +181,10 @@ The Electron window runs sandboxed with context isolation. Links to other sites 
 cd backend  && pytest --cov=clutch && ruff check . && ruff format --check .   # 120 tests
 cd frontend && npm test && npm run typecheck && npm run build
 cd desktop  && npm run check                                                  # syntax + node:test
+cd desktop  && npm run e2e                                                    # Playwright: opens every page of the real app
 ```
 
-CI runs the backend suite on Linux and Windows, plus the frontend and desktop checks. OpenAPI docs are served at `/api/docs`.
+CI runs the backend suite on Linux and Windows, plus the frontend and desktop checks. The end-to-end run (`npm run e2e`, after `npm install` in `desktop/`) launches the real Electron app in a throwaway profile, data folder and database, so it can run next to your own Clutch without touching its clips, settings or hotkeys; it fails on error screens or console errors and saves a screenshot of every page to `desktop/e2e-results/`. OpenAPI docs are served at `/api/docs`.
 
 **Adding a stats game:** implement `GameProvider` in `backend/clutch/games/<game>.py` with its `GameMeta`, add a demo generator in the upstream API's shape, and register it in `games/__init__.py`. The UI picks it up from `/api/games`.
 

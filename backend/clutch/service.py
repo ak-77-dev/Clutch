@@ -69,6 +69,16 @@ class Clutch:
             self.sync(game, profile.key)
         return profile
 
+    def _stored_profile(self, game: str, key: str) -> Profile | None:
+        """A saved profile; the demo profile is created on first use, so a link to it works
+        on a fresh install (before anyone has searched for "demo")."""
+        profile = self.store.profile(game, key)
+        if profile is None and key.startswith("demo"):
+            p = self.provider(game)
+            if p.demo_profile().key == key:
+                profile = self._ensure_demo(p)
+        return profile
+
     def _ensure_demo(self, p: GameProvider) -> Profile:
         profile = p.demo_profile()
         if not self.store.profile(p.meta.id, profile.key):
@@ -80,7 +90,7 @@ class Clutch:
 
     def sync(self, game: str, key: str) -> dict[str, Any]:
         p = self.provider(game)
-        profile = self.store.profile(game, key)
+        profile = self._stored_profile(game, key)
         if profile is None:
             raise LookupError(key)
         if profile.demo:
@@ -110,7 +120,7 @@ class Clutch:
     def matches(self, game: str, key: str) -> list[Match]:
         """Parsed matches, newest first (memoized until new raw matches arrive)."""
         p = self.provider(game)
-        profile = self.store.profile(game, key)
+        profile = self._stored_profile(game, key)
         if profile is None:
             raise LookupError(key)
         raws = self.store.raw_matches(game, key)
@@ -133,7 +143,7 @@ class Clutch:
 
     def overview(self, game: str, key: str) -> dict[str, Any]:
         p = self.provider(game)
-        profile = self.store.profile(game, key)
+        profile = self._stored_profile(game, key)
         if profile is None:
             raise LookupError(key)
         ms = self.matches(game, key)

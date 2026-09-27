@@ -6,6 +6,7 @@ Runs against a fake media backend and mixer, so no real player is ever touched.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -227,3 +228,21 @@ def test_duck_survives_a_crash(tmp_path):
     m.duck(0.3)
     m.restore()  # the normal path clears the file too
     assert not duck_file.exists()
+
+
+def test_position_corrections_reach_the_ui(monkeypatch):
+    import asyncio
+
+    clock = [1000.0]
+    monkeypatch.setattr("clutch.local.media.time.time", lambda: clock[0])
+    at = lambda pos, status="playing": [{**_yt("Enough", status), "position": pos}]  # noqa: E731
+    # Steady play, then a seek inside the app, then buffering (the song stalls), then a pause.
+    frames = [at(10.0), at(11.0), at(12.0), at(95.0), at(96.0), at(96.0), at(96.0), at(96.0, "paused")]
+    published = []
+    bus = SimpleNamespace(publish=lambda kind, **state: published.append(state["sessions"][0]["position"]))
+    m = MediaService(bus, backend=ScriptedBackend(frames, lambda i: b"x"))
+    for _ in frames:
+        asyncio.run(m._refresh())
+        clock[0] += 1.0
+    # First state; the seek (12 -> 95); the stall once it's 2 s behind; the pause. Steady seconds send nothing.
+    assert published == [10.0, 95.0, 96.0, 96.0]
